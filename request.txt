@@ -1,0 +1,7 @@
+python=3.7
+carla
+pytorch
+cv2
+numpy
+
+
