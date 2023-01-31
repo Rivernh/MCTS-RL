@@ -7,8 +7,8 @@ MCTS pure for autonomous driving
 
 from __future__ import print_function
 import sys
-sys.path.append(r'/home/ylh/MCTS-Carla/scripts/CARLA')
-sys.path.insert(0,r'/home/ylh/MCTS-Carla/scripts/Ours')
+sys.path.append(r'/home/ylh/MCTS-RL/CARLA')
+sys.path.insert(0,r'/home/ylh/MCTS-RL/Ours')
 from Module.mcts_pure import MCTSPlayer as MCTS_Pure
 import numpy as np
 import gym

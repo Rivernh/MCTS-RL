@@ -8,7 +8,7 @@ import os
 import random
 import math
 import sys
-sys.path.append(r'/home/ylh/MCTS-Carla/scripts/Ours')
+sys.path.append(r'/home/ylh/MCTS-RL/Ours')
 
 from utils.process import start_process
 

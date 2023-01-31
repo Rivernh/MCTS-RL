@@ -1,6 +1,6 @@
 import gym
 import sys
-sys.path.insert(0,r'/home/ylh/MCTS-Carla/scripts/Ours')
+sys.path.insert(0,r'/home/ylh/MCTS-RL/Ours')
 from gym_carla.envs import carla_env
 from Module.mcts_pure import MCTSPlayer as MCTS_Pure
 import numpy as np

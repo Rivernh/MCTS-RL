@@ -11,8 +11,8 @@ import carla
 import random 
 import time
 import numpy as np
-sys.path.append(r'/home/ylh/MCTS-Carla/scripts/CARLA')
-sys.path.append(r'/home/ylh/MCTS-Carla/scripts/Ours')
+sys.path.append(r'/home/ylh/MCTS-RL/CARLA')
+sys.path.append(r'/home/ylh/MCTS-RL/Ours')
 from agents.navigation.basic_agent import BasicAgent
 from utils.process import start_process
 from agents.navigation.controller import PIDLongitudinalController

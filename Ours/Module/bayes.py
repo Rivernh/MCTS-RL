@@ -4,6 +4,9 @@ import numpy as np
 before prediction,we assume that the number of people
 whose dirving style in [0,1] is averaged,so the starting
 driving style is 0.5 ,for the prior prob
+
+推理输入为状态向量：己方速度，己方驾驶风格参数，最近智能体速度，最近智能体驾驶参数，距离，方位角
+
 """
 class Bayes():
     def __init__(self,n_candidate = 9):
