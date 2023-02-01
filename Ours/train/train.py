@@ -24,7 +24,7 @@ from ..Module.mcts_withnet import MCTSPlayer
 
 
 class generator():
-    def __init__(self, filepath="/home/ylh/MCTS-RL/Ours/data", batch_size=16):  # 形参用到的，路径+batchsize+是否数据增强
+    def __init__(self, filepath="/home/ylh/MCTS-RL/Ours/data", batch_size=16):
         self.base_dir = filepath
         self.image_names = os.listdir(filepath + '/img')  # 所有图片名称
         np.random.shuffle(self.image_names)
@@ -59,7 +59,7 @@ class generator():
             if len(images) == batch_size:
                 break  # 一次batchsize完毕，推出循环
 
-        images = np.asarray(images, dtype=np.uint8)  # 将list格式的images转为n h w c用于data_aug_sequential输入
+        images = np.asarray(images, dtype=np.uint8)
 
         return images / 255, labels
 
@@ -116,7 +116,7 @@ class TrainPipeline():
         state_batch = [data['state'] for data in d_batch]
         mcts_probs_batch = [data['prob'] for data in d_batch]
         value_batch = [data['value'] for data in d_batch]
-        old_probs, old_v = self.policy_value_net.policy_value(state_batch)
+        old_probs, old_v = self.policy_value_net.policy_value(img_batch, state_batch)
         for i in range(self.epochs):
             loss, entropy = self.policy_value_net.train_step(
                     img_batch,
@@ -124,7 +124,7 @@ class TrainPipeline():
                     mcts_probs_batch,
                     value_batch,
                     self.learn_rate*self.lr_multiplier)
-            new_probs, new_v = self.policy_value_net.policy_value(state_batch)
+            new_probs, new_v = self.policy_value_net.policy_value(img_batch, state_batch)
             kl = np.mean(np.sum(old_probs * (
                     np.log(old_probs + 1e-10) - np.log(new_probs + 1e-10)),
                     axis=1)
