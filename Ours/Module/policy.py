@@ -1,3 +1,11 @@
+# -*- coding: utf-8 -*-
+"""
+the policy net
+
+@author: Liuhan Yin
+"""
+
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
