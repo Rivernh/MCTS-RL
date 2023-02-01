@@ -147,17 +147,18 @@ class PolicyValueNet():
         value = value.data[0][0]
         return act_probs, value
 
-    def train_step(self, state_batch, mcts_probs, winner_batch, lr):
+    def train_step(self, img_batch, state_batch, mcts_probs, value_batch, lr):
         """perform a training step"""
         # wrap in Variable
         if self.use_gpu:
+            img_batch = Variable(torch.FloatTensor(np.array(img_batch)).cuda())
             state_batch = Variable(torch.FloatTensor(np.array(state_batch)).cuda())
             mcts_probs = Variable(torch.FloatTensor(np.array(mcts_probs)).cuda())
-            winner_batch = Variable(torch.FloatTensor(np.array(winner_batch)).cuda())
+            value_batch = Variable(torch.FloatTensor(np.array(value_batch)).cuda())
         else:
-            state_batch = Variable(torch.FloatTensor(np.array(state_batch)))
+            img_batch = Variable(torch.FloatTensor(np.array(img_batch)))
             mcts_probs = Variable(torch.FloatTensor(np.array(mcts_probs)))
-            winner_batch = Variable(torch.FloatTensor(np.array(winner_batch)))
+            value_batch = Variable(torch.FloatTensor(np.array(value_batch)))
 
         # zero the parameter gradients
         self.optimizer.zero_grad()
@@ -165,10 +166,10 @@ class PolicyValueNet():
         set_learning_rate(self.optimizer, lr)
 
         # forward
-        log_act_probs, value = self.policy_value_net(state_batch)
+        log_act_probs, value = self.policy_value_net(img_batch, state_batch)
         # define the loss = (z - v)^2 - pi^T * log(p) + c||theta||^2
         # Note: the L2 penalty is incorporated in optimizer
-        value_loss = F.mse_loss(value.view(-1), winner_batch)
+        value_loss = F.mse_loss(value.view(-1), value_batch)
         policy_loss = -torch.mean(torch.sum(mcts_probs*log_act_probs, 1))
         loss = value_loss + policy_loss
         # backward and optimize

@@ -115,13 +115,14 @@ class TrainPipeline():
         d_batch = [data[1] for data in mini_batch]
         state_batch = [data['state'] for data in d_batch]
         mcts_probs_batch = [data['prob'] for data in d_batch]
-        winner_batch = [data[2] for data in mini_batch]
+        value_batch = [data['value'] for data in d_batch]
         old_probs, old_v = self.policy_value_net.policy_value(state_batch)
         for i in range(self.epochs):
             loss, entropy = self.policy_value_net.train_step(
                     img_batch,
                     state_batch,
                     mcts_probs_batch,
+                    value_batch,
                     self.learn_rate*self.lr_multiplier)
             new_probs, new_v = self.policy_value_net.policy_value(state_batch)
             kl = np.mean(np.sum(old_probs * (
