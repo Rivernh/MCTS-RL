@@ -19,11 +19,6 @@ def set_learning_rate(optimizer, lr):
         param_group['lr'] = lr
 
 class Net(nn.Module):
-    """
-    Simple policy neural network module for solving the Driving task.
-    Consists of one common numpy数组shapedense layer for both policy and value estimate and
-    another dense layer for each.
-    """
 
     def __init__(self, vector_length, n_action_available):
         super(Net, self).__init__()
@@ -111,7 +106,7 @@ class PolicyValueNet():
 
     def policy_value(self, img_batch, state_batch):
         """
-        input: a batch of states
+        input: a batch of states and imgs
         output: a batch of action probabilities and state values
         """
         if self.use_gpu:

@@ -10,8 +10,6 @@ import copy
 from operator import itemgetter
 import sys
 import carla
-from utils.utils import AgentState,array2transform,transform2array
-
 
 def rollout_policy_fn(TreeEnv):
     """a coarse, fast version of policy_fn used in the rollout phase."""
@@ -30,11 +28,10 @@ def policy_value_fn(TreeEnv):
 
 class TreeNode(object):
 
-    def __init__(self, TreeEnv, parent, prior_p):
-        self.TreeEnv = TreeEnv
+    def __init__(self, parent, prior_p):
         self._parent = parent
         self._children = {}  # a map from action to TreeNode
-        self._n_visits = 1   #avoid 0 to in the denominator
+        self._n_visits = 0.00000001   #avoid 0 to in the denominator
         self._Q = 0
         self._u = 0
         self._P = prior_p
@@ -42,7 +39,7 @@ class TreeNode(object):
     def expand(self, action_priors):
         for action, prob in action_priors:
             if action not in self._children:
-                self._children[action] = TreeNode(self.TreeEnv, self, prob)
+                self._children[action] = TreeNode(self, prob)
 
     def select(self, cput):
         return max(self._children.items(),
@@ -75,60 +72,41 @@ class TreeNode(object):
 
 
 class MCTS(object):
-    def __init__(self, TreeEnv, policy_value_fn, c_puct=5, n_playout=100):
-        self.TreeEnv = TreeEnv
-        self._root = TreeNode(self.TreeEnv, None, 1.0)
+    def __init__(self, policy_value_fn, c_puct=5, n_playout=100):
+        self._root = TreeNode(None, 1.0)
         self._policy = policy_value_fn
         self._c_puct = c_puct
         self._n_playout = n_playout
-        self.state_temp = AgentState()
 
     def _playout(self, state):
         node = self._root
+        action = (0,0)
         while(1):
             if node.is_leaf():
 
                 break
             # Greedily select next move.
             action, node = node.select(self._c_puct)
-            print(action)
-            self.TreeEnv.step(action)
+           # print(action)
+            state.do_move(action)
 
-        action_probs, _ = self._policy(self.TreeEnv)
+        action_probs, _ = self._policy(state)
         # Check for end of game
-        end = self.TreeEnv._terminal()
-        if not end:
-            node.expand(action_probs)
-            # Evaluate the leaf node by random rollout
-            # take time rollouts and average to get leaf value
-        leaf_value = self._evaluate_rollout(state)
+        node.expand(action_probs)
+        # Evaluate the leaf node by random rollout
+        # take time rollouts and average to get leaf value
+        leaf_value = state.run_until_end()
+        #print(f"action:{action}    value:{leaf_value}")
         # Update value and visit count of nodes in this traversal.
         node.update_recursive(-leaf_value)
 
-    def _evaluate_rollout(self, state, limit=1000):
-        for i in range(limit):
-            end = self.TreeEnv._terminal()
-            if end:
-                break
-            action_probs = rollout_policy_fn(self.TreeEnv)
-            max_action = max(action_probs, key=itemgetter(1))[0]
-            obs, reward, end, success, info = self.TreeEnv.step(max_action)
-        else:
-            # If no break from the loop, issue a warning.
-            print("WARNING: rollout reached move limit")
-        print(f"reward:{reward}")
-        if success:
-            return 10
-        return reward
-
-    def get_move(self, state):
-        self.state_temp = copy.deepcopy(state)
-        for n in range(self._n_playout):      
-            self._playout(self.state_temp)
-            print(f"playout:{n}")
-            self.TreeEnv.reload(self.state_temp)
-          #  self.TreeEnv.reset()
-            
+    def get_move(self, state, vehicle, waypoints):
+        for n in range(self._n_playout):
+            state.reset(vehicle, waypoints)
+            self._playout(state)
+           # print(f"playout:{n}")
+        for action,node in self._root._children.items():
+            print(f"action:{action}   time:{node._n_visits}")
         return max(self._root._children.items(),
                    key=lambda act_node: act_node[1]._n_visits)[0]
 
@@ -137,17 +115,15 @@ class MCTS(object):
             self._root = self._root._children[last_move]
             self._root._parent = None
         else:
-            self._root = TreeNode(self.TreeEnv, None, 1.0)
+            self._root = TreeNode(None, 1.0)
 
     def __str__(self):
         return "MCTS"
 
 
 class MCTSPlayer(object):
-    def __init__(self, TreeEnv, c_puct=5, n_playout=100):
-        self.TreeEnv = TreeEnv
-        self.mcts = MCTS(self.TreeEnv, policy_value_fn, c_puct, n_playout)
-        self.state = AgentState()
+    def __init__(self, c_puct=5, n_playout=100):
+        self.mcts = MCTS(policy_value_fn, c_puct, n_playout)
 
     def set_player_ind(self, p):
         self.player = p
@@ -155,12 +131,9 @@ class MCTSPlayer(object):
     def reset_player(self):
         self.mcts.update_with_move(-1)
 
-    def get_action(self):
-        self.state.pos = self.TreeEnv.ego_state.pos
-        pos = transform2array(self.state.pos)
-        move = self.mcts.get_move(pos)
+    def get_action(self, state, vehicle, waypoints):
+        move = self.mcts.get_move(state, vehicle, waypoints)
         self.mcts.update_with_move(-1)
-        #self.TreeEnv.reload(self.state)
         return move
 
     def __str__(self):

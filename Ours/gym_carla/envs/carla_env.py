@@ -20,9 +20,10 @@ from gym.utils import seeding
 import carla
 
 from utils.utils import AgentState
+import math
 
 from gym_carla.envs.render import BirdeyeRender
-from gym_carla.envs.route_planner import RoutePlanner
+from agents.navigation.global_route_planner import GlobalRoutePlanner
 from gym_carla.envs.misc import *
 
 from utils.utils import array2transform,transform2array
@@ -110,6 +111,9 @@ class CarlaEnv(gym.Env):
     # Record the time of total steps and resetting steps
     self.reset_step = 0
     self.total_step = 0
+
+    self.ego_transform = self.world.get_map().get_spawn_points()[115]
+    self.target_transform =  self.world.get_map().get_spawn_points()[108]
     
     # Initialize the renderer
     self._init_renderer()
@@ -156,7 +160,7 @@ class CarlaEnv(gym.Env):
         self.start=[52.1+np.random.uniform(-5,5),-4.2, 178.66] # random
         # self.start=[52.1,-4.2, 178.66] # static
         transform = set_carla_transform(self.start)
-      if self._try_spawn_ego_vehicle_at(transform):
+      if self._try_spawn_ego_vehicle_at(self.ego_transform):
         break
       else:
         ego_spawn_times += 1
@@ -193,83 +197,21 @@ class CarlaEnv(gym.Env):
     self.settings.synchronous_mode = True
     self.world.apply_settings(self.settings)
 
-    self.routeplanner = RoutePlanner(self.ego, self.max_waypt)
-    self.waypoints, _, self.vehicle_front = self.routeplanner.run_step()
+    self.waypoints = []
+    self.routeplanner = GlobalRoutePlanner(self.map,5)
+    self.temp = self.routeplanner.trace_route(self.ego.get_transform().location,self.target_transform.location)
+    for i, (waypoint, _) in enumerate(self.temp):
+      self.waypoints.append([waypoint.transform.location.x, waypoint.transform.location.y, waypoint.transform.rotation.yaw])
 
     # Set ego information for render
     self.birdeye_render.set_hero(self.ego, self.ego.id)
 
     return self._get_obs()
 
-  def reload(self,state):
-    # Clear sensor objects  
-    self.collision_sensor = None
-    self.camera_sensor = None
-    self.success = False
-
-    # Delete sensors, vehicles
-    self._clear_all_actors()
-    self.actorlist = []
-
-    # Disable sync mode
-    self._set_synchronous_mode(False)
-    
-    # Get actors polygon list
-    self.vehicle_polygons = []
-    vehicle_poly_dict = self._get_actor_polygons('vehicle.*')
-    self.vehicle_polygons.append(vehicle_poly_dict)
-
-    # Spawn the ego vehicle
-    ego_spawn_times = 0
-    transform = array2transform(state)
-   # print(transform)
-    while True:
-      if self._try_spawn_ego_vehicle_at(transform):
-        break
-      else:
-        print(f"spaw time +1")
-
-    # Add collision sensor
-    self.collision_sensor = self.world.spawn_actor(self.collision_bp, carla.Transform(), attach_to=self.ego)
-    self.collision_sensor.listen(lambda event: get_collision_hist(event))
-    self.actorlist.append(self.collision_sensor)
-    def get_collision_hist(event):
-      impulse = event.normal_impulse
-      intensity = np.sqrt(impulse.x**2 + impulse.y**2 + impulse.z**2)
-      self.collision_hist.append(intensity)
-      if len(self.collision_hist)>self.collision_hist_l:
-        self.collision_hist.pop(0)
-    self.collision_hist = []
-
-    # Add camera sensor
-    self.camera_sensor = self.world.spawn_actor(self.camera_bp, self.camera_trans, attach_to=self.ego)
-    self.camera_sensor.listen(lambda data: get_camera_img(data))
-    self.actorlist.append(self.camera_sensor)
-    def get_camera_img(data):
-      array = np.frombuffer(data.raw_data, dtype = np.dtype("uint8"))
-      array = np.reshape(array, (data.height, data.width, 4))
-      array = array[:, :, :3]
-      array = array[:, :, ::-1]
-      self.camera_img = array
-
-    # Update timesteps
-    self.reset_step+=1
-
-    # Enable sync mode
-    self.settings.synchronous_mode = True
-    self.world.apply_settings(self.settings)
-
-    # Set ego information for render
-    self.birdeye_render.set_hero(self.ego, self.ego.id)
-
-    return self._get_obs()
-  
   def step(self, action):
     # Calculate acceleration and steering
     acc = action[0]
     steer = action[1]
-    acc = -acc
-
     # Convert acceleration to throttle and brake
     if acc > 0:
       throttle = np.clip(acc,0,1)
@@ -291,11 +233,15 @@ class CarlaEnv(gym.Env):
     while len(self.vehicle_polygons) > self.max_past_step:
       self.vehicle_polygons.pop(0)
 
+    self.waypoints = []
+    self.routeplanner = GlobalRoutePlanner(self.map,5)
+    self.temp = self.routeplanner.trace_route(self.ego.get_transform().location,self.target_transform.location)
+    for i, (waypoint, _) in enumerate(self.temp):
+      self.waypoints.append([waypoint.transform.location.x, waypoint.transform.location.y, waypoint.transform.rotation.yaw])
 
     # state information
     info = {
-      'waypoints': self.waypoints,
-      'vehicle_front': self.vehicle_front
+      'waypoints': self.waypoints
     }
     
     # Update timesteps
@@ -529,16 +475,15 @@ class CarlaEnv(gym.Env):
     # cost for lateral acceleration
     r_lat = - abs(self.ego.get_control().steer) * lspeed_lon**2
 
-    r = 200*r_collision + 100*lspeed_lon + 10*r_fast + 1*r_out + r_steer*5 + 0.2*r_lat - 0.1
+    r = 200*r_collision + 100*lspeed_lon + 10*r_fast + 1*r_out + r_steer*500 + 0.2*r_lat - 0.1
 
     return r
 
   def _terminal(self):
     """Calculate whether to terminate the current episode."""
-    return False
     # Get ego state
     if self.time_step > 1000:
-      self.success = True
+      pass
     ego_x, ego_y = get_pos(self.ego)
 
     # If collides
@@ -556,9 +501,10 @@ class CarlaEnv(gym.Env):
           return True
 
     # If out of lane
-    #dis, _ = get_lane_dis(self.waypoints, ego_x, ego_y)
-    #if abs(dis) > self.out_lane_thres:
-     # return True, self.success
+    dis, _ = get_lane_dis(self.waypoints, ego_x, ego_y)
+    if abs(dis) > self.out_lane_thres:
+      return True
+   # print(f"dis:{dis}")
 
     return False
 

@@ -28,7 +28,7 @@ blueprint_library = world.get_blueprint_library()
 model_3 = blueprint_library.filter('model3')[0]
  
 actor_list = []
-transform = world.get_map().get_spawn_points()[90] #spwan_points共265个点，选第一个点作为初始化小车的位置
+transform = world.get_map().get_spawn_points()[100] #spwan_points共265个点，选第一个点作为初始化小车的位置
 #random.choice(self.world.get_map().get_spawn_points())
 vehicle = world.spawn_actor(model_3 , transform)
 agent = Assistagent(vehicle)
@@ -44,6 +44,7 @@ destination = target_transform.location
 agent.set_destination(destination)
 
 agent.set_target_transform(target_transform)
+"""
 while True:
     if agent.done():
         print("Tagent.run(target_transform)he target has been reached, stopping the simulation")
@@ -54,7 +55,7 @@ for agent in actor_list:
     agent.destroy()
 print('done')
 """
-
+"""
 while True:
     if agent.done():
         print("The target has been reached, stopping the simulation")
@@ -70,11 +71,11 @@ while True:
 for agent in actor_list:    
     agent.destroy()
 print('done')
-
+"""
 """
 """
 env_map = world.get_map()
-grp = GlobalRoutePlanner(env_map,3)#3表示每隔3m采样一个路径点，路径点越密集，路径的精度越高
+grp = GlobalRoutePlanner(env_map,5)#3表示每隔3m采样一个路径点，路径点越密集，路径的精度越高
 
 PID = PIDLongitudinalController(vehicle)
 
@@ -96,7 +97,8 @@ while True:
  
     left_right = abs(np.cross(car_dir,s_dir))/np.cross(car_dir,s_dir)
     angle = np.arccos(cos_theta)*left_right
-    vehicle.apply_control(carla.VehicleControl(throttle=0.5, steer=angle*1.5, brake=0.0, hand_brake=False, reverse=False))
+    t = (0.5 - 10*abs(angle)) + 0.1
+    vehicle.apply_control(carla.VehicleControl(throttle=t, steer=angle*1.5, brake=0.0, hand_brake=False, reverse=False))
    #time.sleep(0.2)
     v = vehicle.get_velocity()
     kmh = int(3.6 * np.sqrt(v.x**2 + v.y**2 + v.z**2))
@@ -115,4 +117,4 @@ for agent in actor_list:
     agent.destroy()
 print('done')
 
-"""
+
