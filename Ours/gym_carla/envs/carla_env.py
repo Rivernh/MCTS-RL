@@ -18,15 +18,11 @@ import gym
 from gym import spaces
 from gym.utils import seeding
 import carla
-
 from utils.utils import AgentState
 import math
-
 from gym_carla.envs.render import BirdeyeRender
 from agents.navigation.global_route_planner import GlobalRoutePlanner
 from gym_carla.envs.misc import *
-
-from utils.utils import array2transform,transform2array
 class CarlaEnv(gym.Env):
   """An OpenAI gym wrapper for CARLA simulator."""
 
@@ -36,7 +32,6 @@ class CarlaEnv(gym.Env):
     self.max_past_step = params['max_past_step']
     self.number_of_vehicles = params['number_of_vehicles']
     self.dt = params['dt']
-    self.task_mode = params['task_mode']
     self.max_time_episode = params['max_time_episode']
     self.max_waypt = params['max_waypt']
     self.obs_range = params['obs_range']
@@ -48,28 +43,7 @@ class CarlaEnv(gym.Env):
     self.display_route = params['display_route']
     self.speed_last = None
     self.actorlist = []
-
-    self.availables = params['availables']
-    self.action_num = params['action_num']
-    self.success = False
     self.ego_state = AgentState()
-
-    # Destination
-    if params['task_mode'] == 'roundabout':
-      self.dests = [[4.46, -61.46, 0], [-49.53, -2.89, 0], [-6.48, 55.47, 0], [35.96, 3.33, 0]]
-    else:
-      self.dests = None
-
-    # action and observation spaces
-    self.discrete_act = [params['discrete_acc'], params['discrete_steer']] # acc, steer
-    observation_space_dict = {
-      'camera': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
-      #'lidar': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
-      'birdeye': spaces.Box(low=0, high=255, shape=(self.obs_size, self.obs_size, 3), dtype=np.uint8),
-      'state': spaces.Box(np.array([-2, -1, -5, 0]), np.array([2, 1, 30, 1]), dtype=np.float32)
-      }
-      
-    self.observation_space = spaces.Dict(observation_space_dict)
 
     # Connect to carla server and get world object
     print('connecting to Carla server...')
@@ -122,7 +96,6 @@ class CarlaEnv(gym.Env):
     # Clear sensor objects  
     self.collision_sensor = None
     self.camera_sensor = None
-    self.success = False
 
     # Delete sensors, vehicles and walkers
     self._clear_all_actors()
@@ -154,12 +127,10 @@ class CarlaEnv(gym.Env):
       if ego_spawn_times > self.max_ego_spawn_times:
         self.reset()
 
-      if self.task_mode == 'random':
-        transform = random.choice(self.vehicle_spawn_points)
-      if self.task_mode == 'roundabout':
-        self.start=[52.1+np.random.uniform(-5,5),-4.2, 178.66] # random
+      #if self.task_mode == 'roundabout':
+        #self.start=[52.1+np.random.uniform(-5,5),-4.2, 178.66] # random
         # self.start=[52.1,-4.2, 178.66] # static
-        transform = set_carla_transform(self.start)
+       # transform = set_carla_transform(self.start)
       if self._try_spawn_ego_vehicle_at(self.ego_transform):
         break
       else:
@@ -198,7 +169,7 @@ class CarlaEnv(gym.Env):
     self.world.apply_settings(self.settings)
 
     self.waypoints = []
-    self.routeplanner = GlobalRoutePlanner(self.map,5)
+    self.routeplanner = GlobalRoutePlanner(self.map,3)
     self.temp = self.routeplanner.trace_route(self.ego.get_transform().location,self.target_transform.location)
     for i, (waypoint, _) in enumerate(self.temp):
       self.waypoints.append([waypoint.transform.location.x, waypoint.transform.location.y, waypoint.transform.rotation.yaw])
@@ -206,24 +177,58 @@ class CarlaEnv(gym.Env):
     # Set ego information for render
     self.birdeye_render.set_hero(self.ego, self.ego.id)
 
+    temp_target = self.waypoints[1]  #
+    car_mat = self.ego.get_transform().get_matrix()
+    car_dir = np.array([car_mat[0][0], car_mat[1][0]])
+    s_dir = np.array([temp_target[0] - car_mat[0][3], temp_target[1] - car_mat[1][3]])
+    cos_theta = np.dot(car_dir, s_dir) / (np.linalg.norm(car_dir) * np.linalg.norm(s_dir))
+    left_right = abs(np.cross(car_dir, s_dir)) / np.cross(car_dir, s_dir)
+    self.angle = np.arccos(cos_theta) * left_right
+
     return self._get_obs()
 
   def step(self, action):
-    # Calculate acceleration and steering
-    acc = action[0]
-    steer = action[1]
-    # Convert acceleration to throttle and brake
-    if acc > 0:
-      throttle = np.clip(acc,0,1)
-      if throttle > 1 :
-        throttle = 1
-      brake = 0
-    else:
-      throttle = 0
-      brake = np.clip(-acc,0,1)
-    # Apply control
-    act = carla.VehicleControl(throttle=float(throttle), steer=float(steer), brake=float(brake))
-    self.ego.apply_control(act)
+    if self.time_step % 2 == 0:
+        #v = self.ego.get_velocity()
+        #print(f"carla speed :{v.x,v.y}")
+
+        temp_target = self.waypoints[1] #
+        car_mat = self.ego.get_transform().get_matrix()
+        car_dir = np.array([car_mat[0][0], car_mat[1][0]])
+        s_dir = np.array([temp_target[0] - car_mat[0][3], temp_target[1]- car_mat[1][3]])
+        cos_theta = np.dot(car_dir, s_dir) / (np.linalg.norm(car_dir) * np.linalg.norm(s_dir))
+        left_right = abs(np.cross(car_dir, s_dir)) / np.cross(car_dir, s_dir)
+        self.angle = np.arccos(cos_theta) * left_right
+        #print(f"steer:{self.angle*1.5}")
+
+        #if self.time_step > 20:
+        #    speed = math.sqrt(v.x**2 + v.y**2)
+        #    pos = self.ego.get_transform().rotation.yaw / 180 * math.pi
+        #    temp = [0,0]
+        #    temp[0] = speed * math.cos(pos+self.angle *2)
+        #    temp[1] = speed * math.sin(pos+self.angle *2)
+        #    print(f"caculate:{temp[0],temp[1]}")
+
+        # Calculate acceleration and steering
+        acc = action / 6
+        steer = self.angle * 1.5
+        if steer > 0.9:
+          steer = 0.9
+        elif steer < -0.9:
+          steer = -0.9
+        # Convert acceleration to throttle and brake
+        if acc > 0:
+          throttle = acc
+          if throttle > 1:
+            throttle = 1
+          brake = 0
+        else:
+          throttle = 0
+          brake = -acc
+        # Apply control
+       # print(f"acc:{float(throttle)}    steer:{float(steer)}")
+        act = carla.VehicleControl(throttle=float(throttle), steer=float(steer), brake=float(brake))
+        self.ego.apply_control(act)
 
     self.world.tick()
 
@@ -234,7 +239,7 @@ class CarlaEnv(gym.Env):
       self.vehicle_polygons.pop(0)
 
     self.waypoints = []
-    self.routeplanner = GlobalRoutePlanner(self.map,5)
+    self.routeplanner = GlobalRoutePlanner(self.map,3)
     self.temp = self.routeplanner.trace_route(self.ego.get_transform().location,self.target_transform.location)
     for i, (waypoint, _) in enumerate(self.temp):
       self.waypoints.append([waypoint.transform.location.x, waypoint.transform.location.y, waypoint.transform.rotation.yaw])
@@ -248,15 +253,15 @@ class CarlaEnv(gym.Env):
     self.time_step += 1
     self.total_step += 1
 
-    #if self.time_step > 1000:
-     # self.success = True
-
     spectator = self.world.get_spectator()
     transform = self.ego.get_transform()
     spectator.set_transform(carla.Transform(transform.location + carla.Location(z=50),
                                             carla.Rotation(pitch=-90)))
+    #print(f"pos yaw:{transform.rotation.yaw / 180 *math.pi}")
+    #yaw = get_speed_yaw(self.ego)
+    #print(f"speed yaw:{yaw}")
 
-    return (self._get_obs(), self._get_reward(), self._terminal(), self.success, copy.deepcopy(info))
+    return (self._get_obs(), self._get_reward(), self._terminal(), copy.deepcopy(info))
 
   def seed(self, seed=None):
     self.np_random, seed = seeding.np_random(seed)
@@ -417,20 +422,18 @@ class CarlaEnv(gym.Env):
     ego_x = ego_trans.location.x
     ego_y = ego_trans.location.y
     ego_yaw = ego_trans.rotation.yaw/180*np.pi
-    lateral_dis, w = get_preview_lane_dis(self.waypoints, ego_x, ego_y)
-    delta_yaw = np.arcsin(np.cross(w, 
-      np.array(np.array([np.cos(ego_yaw), np.sin(ego_yaw)]))))
     v = self.ego.get_velocity()
     speed = np.sqrt(v.x**2 + v.y**2)
     
     self.ego_state.front_view = camera.astype(np.uint8)
-    self.ego_state.pos = ego_trans
+    self.ego_state.pos = [ego_x,ego_y,ego_yaw]
     self.ego_state.speed = speed
     if self.speed_last is None:
       self.ego_state.acc = 0.0
     else:
       self.ego_state.acc = (speed - self.speed_last) / self.dt
     self.speed_last = speed
+
 
 
     obs = {
@@ -489,16 +492,6 @@ class CarlaEnv(gym.Env):
     # If collides
     if len(self.collision_hist)>0: 
       return True
-
-    # If reach maximum timestep
-    #if self.time_step>self.max_time_episode:
-      #return True, self.success
-
-    # If at destination
-    if self.dests is not None: # If at destination
-      for dest in self.dests:
-        if np.sqrt((ego_x-dest[0])**2+(ego_y-dest[1])**2)<4:
-          return True
 
     # If out of lane
     dis, _ = get_lane_dis(self.waypoints, ego_x, ego_y)

@@ -3,31 +3,23 @@ import math
 import itertools
 import copy
 from gym_carla.envs.misc import *
+import queue
+
 
 class Dynamics_Env():
     """a dynamics env of carla"""
     def __int__(self):
-        self.current_cmd = None
-        self.distance_followed = 0
-        self.delta_t = 0.5
-        self.step = 0
-        self.success = False
-        self.end = False
-        self.hit = False
-        self.action_num = 25
-        self.outlane = False
-        self.waypoints = None
-        self.pos = 0
-        self.out_lane_thres = 0.2
         self.origin_pos = None
+        self.availables = list(itertools.product(np.array([0.5, 0.3, 0, -0.3]), np.array([0, -0.2, 0.2, -0.4, 0.4])))
 
     def reset(self, vehicle, waypoints):
-        self.availables = list(itertools.product(np.array([0.6,0.3,0,-0.3]), np.array([0,-0.2,0.2,-0.4,0.4])))
+        self.availables = np.array([3,2,1,0,-1,-2])
         self.delta_t = 0.5
-        self.out_lane_thres = 0.3
+        self.out_lane_thres = 2
         self.current_pos = np.zeros(3)
         self.current_speed = np.zeros(2)
         self.step = 0
+        self.max_step = 20
         self.success = False
         self.end = False
         self.hit = False
@@ -40,31 +32,67 @@ class Dynamics_Env():
         speed = vehicle.get_velocity()
         self.current_speed[0] = speed.x
         self.current_speed[1] = speed.y
+        self.transform = vehicle.get_transform()
 
         self.origin_pos = get_info(vehicle)
         self.current_pos[0] = self.origin_pos[0]
         self.current_pos[1] = self.origin_pos[1]
         self.current_pos[2] = self.origin_pos[2]
 
+        self.max_speed = 10
+        self.speed = 0
+        self.acc = 0
+
+    """
+    将指令转换为速度信息
+    每个油门指令有一个对应的最大速度，若为达到则加速，若到达，则保持
+    若油门为0或负，则有减速，且最多减速为0，不能变向加速
+    
+    近似认为动作执行后，速度方向与汽车方向一致
+    
+    """
     def take_action(self, action):
-        acc = action[0]
-        steer = action[1]
-        temp = np.zeros(2)
-        theta = self.current_pos[2]
+        temp_target = self.waypoints[1]  #
+        yaw = self.current_pos[2]
+        car_dir = np.array([math.cos(yaw), math.sin(yaw)])
+        s_dir = np.array([temp_target[0] - self.current_pos[0], temp_target[1] - self.current_pos[1]])
+        cos_theta = np.dot(car_dir, s_dir) / (np.linalg.norm(car_dir) * np.linalg.norm(s_dir))
+        left_right = abs(np.cross(car_dir, s_dir)) / np.cross(car_dir, s_dir)
+        angle = np.arccos(cos_theta) * left_right
 
-        delta_v = acc * self.delta_t
+        steer = angle * 2
+        acc = action
+        self.acc = acc
 
-        temp[0] = self.current_speed[0] + delta_v * math.sin(theta - steer)
-        temp[1] = self.current_speed[1] + delta_v * math.sin(theta - steer)
-
+        v = math.sqrt(self.current_speed[0]**2 + self.current_speed[1]**2)
+        v_after = acc * self.delta_t + v
         if acc > 0:
-            self.current_speed[0] = temp[0]
-            self.current_speed[1] = temp[1]
+            if v_after >= self.max_speed:
+                v_after = self.max_speed
         else:
-            if (temp[0]**2 + temp[1]**2) < (self.current_speed[0]**2 + self.current_speed[1]**2):
-                self.current_speed[0] = temp[0]
-                self.current_speed[1] = temp[1]
+            if v_after <= 0:
+                v_after = 0
 
+        self.current_speed[0] = v_after * math.cos(yaw+steer)
+        self.current_speed[1] = v_after * math.sin(yaw+steer)
+        #TODO 计算车辆的角度
+        v = math.sqrt(self.current_speed[0] ** 2 + self.current_speed[1] ** 2)
+        self.speed = v
+        if self.current_speed[0]!=0:
+            yaw = math.atan(self.current_speed[1]/self.current_speed[0])
+            if v > 0:
+                if yaw > 0:
+                    if self.current_speed[0] > 0:
+                        self.current_pos[2] = yaw
+                    elif self.current_speed[0] < 0:
+                        self.current_pos[2] = yaw - math.pi
+                else:
+                    if self.current_speed[0] > 0:
+                        self.current_pos[2] = yaw
+                    elif self.current_speed[0] < 0:
+                        self.current_pos[2] = yaw + math.pi
+
+    """根据动作执行一次"""
     def do_move(self, action):
         self.take_action(action)
         self.step += 1
@@ -86,40 +114,24 @@ class Dynamics_Env():
             return True, False
         if self.out_lane():
             return True, False
-        if self.step > 1000:
+        if self.step > self.max_step:
             return True, False
         return False, False
 
+    """run until the episode end """
     def run_until_end(self):
         while not self.end:
             self.end, self.success = self.next()
         reward = self.get_reward()
         return reward
 
+    """get the episode reward"""
     def get_reward(self):
-        """速度奖励"""
-        speed = math.sqrt(np.sum(self.current_speed[0] ** 2))
-        speed_reward = 10 * speed
-        """距离奖励"""
-        distance_reward = 1 * self.pos
-        """完成奖励"""
-        if self.success:
-            finished_reward = 1
-        else:
-            finished_reward = 0
-        """碰撞奖励"""
-        if self.hit:
-            crash_reward = -1
-        else:
-            crash_reward = 0
-        """偏离路径太大奖励"""
-        if self.outlane:
-            out_reward = -1
-        else:
-            out_reward = 0
-        """时间奖励"""
-        step_reward = -0.01 * self.step
-        reward = speed_reward + distance_reward + finished_reward + crash_reward + step_reward + out_reward
+        speed_reward = 1 - np.exp(-(self.speed**2))
+        acc_reward = np.exp(-(self.acc**2))
+        #print(f"s rew:{speed_reward}    a rew:{acc_reward}")
+
+        reward = speed_reward + 0.5*acc_reward
         return reward
 
     """hit other car"""
@@ -128,14 +140,12 @@ class Dynamics_Env():
         self.hit = False
         return self.hit
 
+    """check if arrive the end"""
     def arrive(self):
-        #self.pos_check()
-        if self.pos >= self.wpt_len - 2:
-            return True
-        return
+        return False
 
     def out_lane(self):
-        dis, _ = get_lane_dis(self.waypoints, self.current_pos[0], self.current_pos[1])
+        dis, w = get_lane_dis(self.waypoints, self.current_pos[0], self.current_pos[1])
         if abs(dis) > self.out_lane_thres:
             self.outlane = True
             return True
@@ -143,37 +153,15 @@ class Dynamics_Env():
      #   print(f"step:{self.step}")
         return False
 
-    def pos_check(self):
-        waypoint_before = self.waypoints[0]
-        for index in np.arange(self.wpt_len-2):
-            waypoint_mid = self.waypoints[index+1]
-            waypoint_after = self.waypoints[index+2]
-            k0 = (waypoint_mid[1] - waypoint_before[1]) / (waypoint_mid[0] - waypoint_before[0])
-            k0 = -1 / k0
-            value0 = k0 * (self.current_pos[0] - (waypoint_mid[0] + waypoint_before[0]) / 2) - self.current_pos[1] + (waypoint_mid[1] + waypoint_before[1]) / 2
-
-            k1 = (waypoint_after[1] - waypoint_mid[1]) / (waypoint_after[0] - waypoint_mid[0])
-            k1 = -1 / k1
-            value1 = k1 * (self.current_pos[0] - (waypoint_after[0] + waypoint_mid[0]) / 2) - self.current_pos[1] + (waypoint_after[1] + waypoint_mid[1]) / 2
-
-            waypoint_before = waypoint_mid
-
-            if value1 * value0 <= 0:
-                self.pos = index + 1
-                break
-        else:
-            self.pos = 0
-        print(f"self.pos:{self.pos}")
-        return self.pos
-
+    """check if end"""
     def terminal(self):
         if self.hist():
             return True
         if self.arrive():
             return True
-        if self.out_lane():
-            return True
-        if self.step > 1000:
+        #if self.out_lane():
+        #    return True
+        if self.step > self.max_step:
             return True
         return False
 

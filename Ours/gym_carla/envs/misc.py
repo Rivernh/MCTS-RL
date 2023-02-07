@@ -17,6 +17,27 @@ from matplotlib.path import Path
 import skimage
 
 
+
+def get_speed_yaw(vehicle):
+  """return :-pi ~ pi"""
+  vel = vehicle.get_velocity()
+  v = math.sqrt(vel.x ** 2 + vel.y ** 2 + vel.z ** 2)
+  if vel.x != 0:
+    yaw = math.atan(vel.y / vel.x)
+    if v > 0:
+      if yaw > 0:
+        if vel.x < 0:
+          yaw = yaw - math.pi
+      else:
+        if vel.x< 0:
+          yaw = yaw + math.pi
+  else:
+    yaw = vehicle.get_transform().rotation.yaw
+  return yaw
+
+
+
+
 def get_speed(vehicle):
   """
   Compute speed of a vehicle in Kmh

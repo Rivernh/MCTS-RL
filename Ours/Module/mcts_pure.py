@@ -31,8 +31,8 @@ class TreeNode(object):
     def __init__(self, parent, prior_p):
         self._parent = parent
         self._children = {}  # a map from action to TreeNode
-        self._n_visits = 0.00000001   #avoid 0 to in the denominator
-        self._Q = 0
+        self._n_visits = np.finfo(float).eps  #avoid 0 to in the denominator
+        self._Q = np.finfo(float).eps
         self._u = 0
         self._P = prior_p
 
@@ -49,20 +49,20 @@ class TreeNode(object):
         # Count visit.
         self._n_visits += 1
         # Update Q, a running average of values for all visits.
-        self._Q += 1.0*(leaf_value - self._Q) / self._n_visits
+        self._Q += leaf_value
 
     def update_recursive(self, leaf_value):
         # update all ancesstor nodes
         # If it is not root, this node's parent should be updated first.
         if self._parent:
-            self._parent.update_recursive(-leaf_value)
+            self._parent.update_recursive(leaf_value)
         self.update(leaf_value)
 
     def get_value(self, c_puct):
         #self._u = (c_puct * self._P *
         #           np.sqrt(self._parent._n_visits) / (1 + self._n_visits))
         self._u = c_puct * self._P * np.sqrt(2 * np.log(self._parent._n_visits) / self._n_visits)
-        return self._Q + self._u
+        return self._Q / self._n_visits + self._u
 
     def is_leaf(self):
         return self._children == {}
@@ -96,17 +96,18 @@ class MCTS(object):
         # Evaluate the leaf node by random rollout
         # take time rollouts and average to get leaf value
         leaf_value = state.run_until_end()
+
         #print(f"action:{action}    value:{leaf_value}")
         # Update value and visit count of nodes in this traversal.
-        node.update_recursive(-leaf_value)
+        node.update_recursive(leaf_value)
 
     def get_move(self, state, vehicle, waypoints):
         for n in range(self._n_playout):
             state.reset(vehicle, waypoints)
             self._playout(state)
-           # print(f"playout:{n}")
+            #print(f"play out:{n}")
         for action,node in self._root._children.items():
-            print(f"action:{action}   time:{node._n_visits}")
+            print(f"action:{action}   time:{node._n_visits}   value:{node._Q / node._n_visits}")
         return max(self._root._children.items(),
                    key=lambda act_node: act_node[1]._n_visits)[0]
 

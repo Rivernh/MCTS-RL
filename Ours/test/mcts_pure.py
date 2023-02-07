@@ -30,7 +30,6 @@ def Env_init():
         'ego_vehicle_filter': 'vehicle.lincoln*',  # filter for defining ego vehicle
         'port': 2000,  # connection port
         'town': 'Town03',  # which town to simulate
-        'task_mode': 'random',  # mode of the task, [random, roundabout (only for Town03)]
         'max_time_episode': 1000,  # maximum timesteps per episode
         'max_waypt': 12,  # maximum number of waypoints
         'obs_range': 32,  # observation range (meter)
@@ -39,8 +38,6 @@ def Env_init():
         'desired_speed': 10,  # desired speed (m/s)
         'max_ego_spawn_times': 200,  # maximum times to spawn ego vehicle
         'display_route': True,  # whether to render the desired route
-        'action_num':20,
-        'availables':list(itertools.product(np.arange(-5,5,1), np.arange(-5,5,1) / 10))
     }
     env = carla_env.CarlaEnv(params)
     env.reset()
@@ -61,14 +58,15 @@ def run():
 
 
         # uncomment the following line to play with pure MCTS (it's much weaker even with a larger n_playout)
-        mcts_player = MCTS_Pure(c_puct=0.1, n_playout=1000)
+        mcts_player = MCTS_Pure(c_puct=5, n_playout=5000)
         done = False
-        move = (0, 0)
+        move = 0.0
         while not done:
-            print(f"move:{move}")
-            next_obs, reward, done, success, info = car_env.step(move)
-            #print(f"done:{done}")
-            move = mcts_player.get_action(dynamics_env, car_env.ego, car_env.waypoints)
+            next_obs, reward, done, info = car_env.step(move)
+            done = False
+            if car_env.time_step % 10 == 0:
+                move = mcts_player.get_action(dynamics_env, car_env.ego, car_env.waypoints)
+                print(f"move:{move}")
         print("done!")
             
     except KeyboardInterrupt:
