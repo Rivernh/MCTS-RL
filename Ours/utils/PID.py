@@ -1,19 +1,24 @@
 import numpy as np
 
 class PID:
-    def __init__(self, kp = 1.0, ki = 0.0, kd = 0.0):
+    def __init__(self, kp = 0.12 , ki = 0.02, kd = 0.0):
         self.kp = kp
         self.ki = ki
         self.kd = kd
         self.first = True
         self.last = 0.0
         self.sum = 0.0
+        self.step = 0
 
     def reset(self):
         self.first = True
         self.sum = 0.0
+        self.step = 0
     
     def run(self, target, now):
+        self.step += 1
+        if self.step > 10000:
+            self.sum = 0
         error = target - now
         self.sum += error
         if self.first:

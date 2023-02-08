@@ -123,7 +123,7 @@ def get_speed(vehicle, unit=True):
         return math.sqrt(vel.x ** 2 + vel.y ** 2)
 
 
-def get_acceleration(vehicle, unit=True):
+def get_acceleration(vehicle):
     """
     Compute acceleration of a vehicle
         :param unit: the unit of return, True means Km/h^2, False means m/s^2
@@ -131,11 +131,7 @@ def get_acceleration(vehicle, unit=True):
         :return: acceleration as a float 
     """
     acc = vehicle.get_acceleration()
-
-    if unit:
-        return 36 * 36 * 10 * math.sqrt(acc.x ** 2 + acc.y ** 2)
-    else:
-        return math.sqrt(acc.x ** 2 + acc.y ** 2)
+    return [acc.x,acc.y]
 
 
 def get_actor_polygons(world, filt):

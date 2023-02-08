@@ -13,7 +13,7 @@ import pygame
 import random
 import time
 from skimage.transform import resize
-from ..util.misc import get_lane_center,get_yaw_diff
+from ..util.misc import get_acceleration
 import gym
 from gym import spaces
 from gym.utils import seeding
@@ -23,6 +23,7 @@ import math
 from gym_carla.envs.render import BirdeyeRender
 from agents.navigation.global_route_planner import GlobalRoutePlanner
 from gym_carla.envs.misc import *
+from utils.PID import PID
 class CarlaEnv(gym.Env):
   """An OpenAI gym wrapper for CARLA simulator."""
 
@@ -163,6 +164,7 @@ class CarlaEnv(gym.Env):
     # Update timesteps
     self.time_step=0
     self.reset_step+=1
+    self.PID = PID()
 
     # Enable sync mode
     self.settings.synchronous_mode = True
@@ -188,47 +190,65 @@ class CarlaEnv(gym.Env):
     return self._get_obs()
 
   def step(self, action):
-    if self.time_step % 2 == 0:
-        #v = self.ego.get_velocity()
-        #print(f"carla speed :{v.x,v.y}")
+    #v = self.ego.get_velocity()
+    #print(f"carla speed :{v.x,v.y}")
 
-        temp_target = self.waypoints[1] #
-        car_mat = self.ego.get_transform().get_matrix()
-        car_dir = np.array([car_mat[0][0], car_mat[1][0]])
-        s_dir = np.array([temp_target[0] - car_mat[0][3], temp_target[1]- car_mat[1][3]])
-        cos_theta = np.dot(car_dir, s_dir) / (np.linalg.norm(car_dir) * np.linalg.norm(s_dir))
-        left_right = abs(np.cross(car_dir, s_dir)) / np.cross(car_dir, s_dir)
-        self.angle = np.arccos(cos_theta) * left_right
-        #print(f"steer:{self.angle*1.5}")
+    temp_target = self.waypoints[1] #
+    car_mat = self.ego.get_transform().get_matrix()
+    car_dir = np.array([car_mat[0][0], car_mat[1][0]])
+    s_dir = np.array([temp_target[0] - car_mat[0][3], temp_target[1]- car_mat[1][3]])
+    cos_theta = np.dot(car_dir, s_dir) / (np.linalg.norm(car_dir) * np.linalg.norm(s_dir))
+    left_right = abs(np.cross(car_dir, s_dir)) / np.cross(car_dir, s_dir)
+    self.angle = np.arccos(cos_theta) * left_right
+    #print(f"steer:{self.angle*1.5}")
 
-        #if self.time_step > 20:
-        #    speed = math.sqrt(v.x**2 + v.y**2)
-        #    pos = self.ego.get_transform().rotation.yaw / 180 * math.pi
-        #    temp = [0,0]
-        #    temp[0] = speed * math.cos(pos+self.angle *2)
-        #    temp[1] = speed * math.sin(pos+self.angle *2)
-        #    print(f"caculate:{temp[0],temp[1]}")
+    #if self.time_step > 20:
+    #    speed = math.sqrt(v.x**2 + v.y**2)
+    #    pos = self.ego.get_transform().rotation.yaw / 180 * math.pi
+    #    temp = [0,0]
+    #    temp[0] = speed * math.cos(pos+self.angle *2)
+    #    temp[1] = speed * math.sin(pos+self.angle *2)
+    #    print(f"caculate:{temp[0],temp[1]}")
 
-        # Calculate acceleration and steering
-        acc = action / 6
-        steer = self.angle * 1.5
-        if steer > 0.9:
-          steer = 0.9
-        elif steer < -0.9:
-          steer = -0.9
-        # Convert acceleration to throttle and brake
-        if acc > 0:
-          throttle = acc
-          if throttle > 1:
-            throttle = 1
-          brake = 0
-        else:
-          throttle = 0
-          brake = -acc
-        # Apply control
-       # print(f"acc:{float(throttle)}    steer:{float(steer)}")
-        act = carla.VehicleControl(throttle=float(throttle), steer=float(steer), brake=float(brake))
-        self.ego.apply_control(act)
+    # Calculate acceleration and steering
+    steer = self.angle * 1.5
+    if steer > 0.9:
+      steer = 0.9
+    elif steer < -0.9:
+      steer = -0.9
+
+    acc_now = get_acceleration(self.ego)
+    v_now = self.ego.get_velocity()
+    v_now = [v_now.x,v_now.y]
+    #print(f"acc:{acc_now}  v:{math.sqrt(v_now[0]**2 + v_now[1]**2)}")
+    a = np.dot(v_now,acc_now) / math.sqrt(v_now[0]**2 + v_now[1]**2)
+    #print(f"a:{a}")
+    if a >= 3:
+      a = 3
+    elif a <= -3:
+      a = -3
+
+    acc_cmd = action
+    #print(f"acc_now:{a}   acc_cmd:{acc_cmd}")
+    acc = self.PID.run(acc_cmd,a)
+
+    #print(f"throttle:{acc}")
+    # Convert acceleration to throttle and brake
+    if acc > 0:
+      throttle = acc
+      if throttle > 0.7:
+        throttle = 0.7
+      brake = 0
+    else:
+      throttle = 0
+      brake = -acc
+      if brake > 0.4:
+        brake = 0.4
+
+    # Apply control
+   # print(f"acc:{float(throttle)}    steer:{float(steer)}")
+    act = carla.VehicleControl(throttle=float(throttle), steer=float(steer), brake=float(brake))
+    self.ego.apply_control(act)
 
     self.world.tick()
 

@@ -58,9 +58,9 @@ def run():
 
 
         # uncomment the following line to play with pure MCTS (it's much weaker even with a larger n_playout)
-        mcts_player = MCTS_Pure(c_puct=5, n_playout=5000)
+        mcts_player = MCTS_Pure(c_puct=1, n_playout=500)
         done = False
-        move = 0.0
+        move = 0
         while not done:
             next_obs, reward, done, info = car_env.step(move)
             done = False

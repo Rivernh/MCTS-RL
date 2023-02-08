@@ -13,7 +13,7 @@ class Dynamics_Env():
         self.availables = list(itertools.product(np.array([0.5, 0.3, 0, -0.3]), np.array([0, -0.2, 0.2, -0.4, 0.4])))
 
     def reset(self, vehicle, waypoints):
-        self.availables = np.array([3,2,1,0,-1,-2])
+        self.availables = np.array([2,1,0,-1,-2])
         self.delta_t = 0.5
         self.out_lane_thres = 2
         self.current_pos = np.zeros(3)
