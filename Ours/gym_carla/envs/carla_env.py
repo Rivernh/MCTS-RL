@@ -62,6 +62,7 @@ class CarlaEnv(gym.Env):
 
     # Create the ego vehicle blueprint
     self.ego_bp = self._create_vehicle_bluepprint(params['ego_vehicle_filter'], color='49,8,8')
+    self.opponent_bp = self._create_vehicle_bluepprint(params['opponent_vehicle_filter'])
 
     # Collision sensor
     self.collision_hist = [] # The collision history
@@ -77,7 +78,7 @@ class CarlaEnv(gym.Env):
     self.camera_bp.set_attribute('image_size_y', str(self.obs_size))
     self.camera_bp.set_attribute('fov', '110')
     # Set the time in seconds between sensor captures
-    self.camera_bp.set_attribute('sensor_tick', '0.02')
+    self.camera_bp.set_attribute('sensor_tick', '0.05')
 
     # Set fixed simulation step for synchronous mode
     self.settings = self.world.get_settings()
@@ -87,8 +88,12 @@ class CarlaEnv(gym.Env):
     self.reset_step = 0
     self.total_step = 0
 
-    self.ego_transform = self.world.get_map().get_spawn_points()[115]
-    self.target_transform =  self.world.get_map().get_spawn_points()[108]
+    self.ego_transform = carla.Transform(carla.Location(x=params['ego_transform'][0], y=params['ego_transform'][1], z=0.2) ,carla.Rotation(yaw=params['ego_transform'][2]))
+    self.target_transform = carla.Transform(carla.Location(x=params['target_transform'][0], y=params['target_transform'][1], z=0.2),carla.Rotation(yaw=params['target_transform'][2]))
+    self.opponent_transform = carla.Transform(carla.Location(x=params['opponent_transform'][0], y=params['opponent_transform'][1], z=0.2),carla.Rotation(yaw=params['opponent_transform'][2]))
+    #self.ego_transform = self.world.get_map().get_spawn_points()[100]
+    #self.target_transform = self.world.get_map().get_spawn_points()[110]
+    self.opponent_add = params['opponent_add']
     
     # Initialize the renderer
     self._init_renderer()
@@ -105,7 +110,7 @@ class CarlaEnv(gym.Env):
     self._set_synchronous_mode(False)
 
     # Spawn surrounding vehicles
-    random.shuffle(self.vehicle_spawn_points)
+    #random.shuffle(self.vehicle_spawn_points)
     count = self.number_of_vehicles
     if count > 0:
       for spawn_point in self.vehicle_spawn_points:
@@ -127,16 +132,23 @@ class CarlaEnv(gym.Env):
     while True:
       if ego_spawn_times > self.max_ego_spawn_times:
         self.reset()
-
-      #if self.task_mode == 'roundabout':
-        #self.start=[52.1+np.random.uniform(-5,5),-4.2, 178.66] # random
-        # self.start=[52.1,-4.2, 178.66] # static
-       # transform = set_carla_transform(self.start)
       if self._try_spawn_ego_vehicle_at(self.ego_transform):
         break
       else:
         ego_spawn_times += 1
         time.sleep(0.1)
+
+    # Spawn the opponent vehicle
+    if self.opponent_add:
+      opponent_spawn_times = 0
+      while True:
+        if opponent_spawn_times > self.max_ego_spawn_times:
+          self.reset()
+        if self._try_spawn_opponent_vehicle_at(self.opponent_transform):
+          break
+        else:
+          opponent_spawn_times += 1
+          time.sleep(0.1)
 
     # Add collision sensor
     self.collision_sensor = self.world.spawn_actor(self.collision_bp, carla.Transform(), attach_to=self.ego)
@@ -176,6 +188,12 @@ class CarlaEnv(gym.Env):
     for i, (waypoint, _) in enumerate(self.temp):
       self.waypoints.append([waypoint.transform.location.x, waypoint.transform.location.y, waypoint.transform.rotation.yaw])
 
+    if self.opponent_add:
+      self.waypoints_o = []
+      self.temp = self.routeplanner.trace_route(self.opponent.get_transform().location,self.target_transform.location)
+      for i, (waypoint, _) in enumerate(self.temp):
+        self.waypoints_o.append([waypoint.transform.location.x, waypoint.transform.location.y, waypoint.transform.rotation.yaw])
+
     # Set ego information for render
     self.birdeye_render.set_hero(self.ego, self.ego.id)
 
@@ -192,7 +210,7 @@ class CarlaEnv(gym.Env):
   def step(self, action):
     #v = self.ego.get_velocity()
     #print(f"carla speed :{v.x,v.y}")
-
+    #ego agent
     temp_target = self.waypoints[1] #
     car_mat = self.ego.get_transform().get_matrix()
     car_dir = np.array([car_mat[0][0], car_mat[1][0]])
@@ -250,6 +268,48 @@ class CarlaEnv(gym.Env):
     act = carla.VehicleControl(throttle=float(throttle), steer=float(steer), brake=float(brake))
     self.ego.apply_control(act)
 
+    # opponent agent
+    if self.opponent_add:
+      temp_target = self.waypoints_o[1]  #
+      car_mat = self.opponent.get_transform().get_matrix()
+      car_dir = np.array([car_mat[0][0], car_mat[1][0]])
+      s_dir = np.array([temp_target[0] - car_mat[0][3], temp_target[1] - car_mat[1][3]])
+      cos_theta = np.dot(car_dir, s_dir) / (np.linalg.norm(car_dir) * np.linalg.norm(s_dir))
+      left_right = abs(np.cross(car_dir, s_dir)) / np.cross(car_dir, s_dir)
+      self.angle = np.arccos(cos_theta) * left_right
+
+      steer = self.angle * 1.5
+      if steer > 0.9:
+        steer = 0.9
+      elif steer < -0.9:
+        steer = -0.9
+      acc_now = get_acceleration(self.ego)
+      v_now = self.ego.get_velocity()
+      v_now = [v_now.x, v_now.y]
+      a = np.dot(v_now, acc_now) / math.sqrt(v_now[0] ** 2 + v_now[1] ** 2)
+      if a >= 3:
+        a = 3
+      elif a <= -3:
+        a = -3
+      acc_cmd = action
+      # print(f"acc_now:{a}   acc_cmd:{acc_cmd}")
+      acc = self.PID.run(acc_cmd, a)
+
+      if acc > 0:
+        throttle = acc
+        if throttle > 0.7:
+          throttle = 0.7
+        brake = 0
+      else:
+        throttle = 0
+        brake = -acc
+        if brake > 0.4:
+          brake = 0.4
+      # Apply control
+      # print(f"acc:{float(throttle)}    steer:{float(steer)}")
+      act = carla.VehicleControl(throttle=0.5, steer=float(steer), brake=float(brake))
+      self.opponent.apply_control(act)
+
     self.world.tick()
 
     # Append actors polygon list
@@ -263,6 +323,12 @@ class CarlaEnv(gym.Env):
     self.temp = self.routeplanner.trace_route(self.ego.get_transform().location,self.target_transform.location)
     for i, (waypoint, _) in enumerate(self.temp):
       self.waypoints.append([waypoint.transform.location.x, waypoint.transform.location.y, waypoint.transform.rotation.yaw])
+
+    if self.opponent_add:
+      self.waypoints_o = []
+      self.temp = self.routeplanner.trace_route(self.opponent.get_transform().location,self.target_transform.location)
+      for i, (waypoint, _) in enumerate(self.temp):
+        self.waypoints_o.append([waypoint.transform.location.x, waypoint.transform.location.y, waypoint.transform.rotation.yaw])
 
     # state information
     info = {
@@ -348,6 +414,37 @@ class CarlaEnv(gym.Env):
     if vehicle is not None:
       vehicle.set_autopilot()
       return True
+    return False
+
+  def _try_spawn_opponent_vehicle_at(self, transform):
+    """Try to spawn the ego vehicle at specific transform.
+    Args:
+      transform: the carla transform object.
+    Returns:
+      Bool indicating whether the spawn is successful.
+    """
+    vehicle = None
+    # Check if ego position overlaps with surrounding vehicles
+    overlap = False
+    for idx, poly in self.vehicle_polygons[-1].items():
+      poly_center = np.mean(poly, axis=0)
+      ego_center = np.array([transform.location.x, transform.location.y])
+      dis = np.linalg.norm(poly_center - ego_center)
+      if dis > 8:
+        continue
+      else:
+        overlap = True
+        break
+
+    if not overlap:
+      vehicle = self.world.try_spawn_actor(self.opponent_bp, transform)
+    #  print(vehicle)
+
+    if vehicle is not None:
+      self.opponent = vehicle
+      self.actorlist.append(self.opponent)
+      return True
+
     return False
 
   def _try_spawn_ego_vehicle_at(self, transform):
@@ -448,19 +545,6 @@ class CarlaEnv(gym.Env):
     self.ego_state.front_view = camera.astype(np.uint8)
     self.ego_state.pos = [ego_x,ego_y,ego_yaw]
     self.ego_state.speed = speed
-    if self.speed_last is None:
-      self.ego_state.acc = 0.0
-    else:
-      self.ego_state.acc = (speed - self.speed_last) / self.dt
-    self.speed_last = speed
-
-
-
-    obs = {
-      'camera':camera.astype(np.uint8),
-      'birdeye':birdeye.astype(np.uint8),
-      'state': self.ego_state,
-    }
 
     return self.ego_state
 

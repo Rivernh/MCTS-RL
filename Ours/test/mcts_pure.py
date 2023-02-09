@@ -11,11 +11,8 @@ sys.path.insert(0,r'/home/ylh/MCTS-RL/CARLA')
 sys.path.insert(0,r'/home/ylh/MCTS-RL/Ours')
 from Module.mcts_pure import MCTSPlayer as MCTS_Pure
 import numpy as np
-import gym
 from gym_carla.envs import carla_env
-from tqdm import tqdm
 from utils.process import start_process,kill_process
-import itertools
 from dynamics.env import Dynamics_Env
 
 def Env_init():
@@ -28,6 +25,7 @@ def Env_init():
         'discrete_acc': np.arange(-5,5,1),  # discrete value of accelerations
         'discrete_steer': np.arange(-5,5,1) / 10,  # discrete value of steering angles
         'ego_vehicle_filter': 'vehicle.lincoln*',  # filter for defining ego vehicle
+        'opponent_vehicle_filter': 'vehicle.lincoln*',  # filter for defining ego vehicle
         'port': 2000,  # connection port
         'town': 'Town03',  # which town to simulate
         'max_time_episode': 1000,  # maximum timesteps per episode
@@ -38,19 +36,17 @@ def Env_init():
         'desired_speed': 10,  # desired speed (m/s)
         'max_ego_spawn_times': 200,  # maximum times to spawn ego vehicle
         'display_route': True,  # whether to render the desired route
+        'ego_transform': (59.9, -7.6, -179.1),#(2.2, 77.1, -88.1),
+        'target_transform': (5, -50, -89.3),
+        'opponent_transform': (2.2, 30, -88.1), #(59.9, -7.6, -179.1),
+        'opponent_add': True
     }
     env = carla_env.CarlaEnv(params)
     env.reset()
     return env
 
-def test():
-    env = Env_init()
-    bp_lib = env.world.get_map().get_spawn_points()
-    print(bp_lib)
-
-
-
 def run():
+    start_process(show=True)
     #model_file = 'current_policy.model'
     car_env = Env_init()
     dynamics_env = Dynamics_Env()
@@ -58,9 +54,9 @@ def run():
 
 
         # uncomment the following line to play with pure MCTS (it's much weaker even with a larger n_playout)
-        mcts_player = MCTS_Pure(c_puct=1, n_playout=500)
+        mcts_player = MCTS_Pure(c_puct=0.5, n_playout=5000)
         done = False
-        move = 0
+        move = 2
         while not done:
             next_obs, reward, done, info = car_env.step(move)
             done = False
@@ -78,6 +74,4 @@ def run():
 
 
 if __name__ == '__main__':
-    start_process(show=False)
-
     run()
