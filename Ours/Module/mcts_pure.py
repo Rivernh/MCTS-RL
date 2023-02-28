@@ -87,7 +87,6 @@ class MCTS(object):
                 break
             # Greedily select next move.
             action, node = node.select(self._c_puct)
-           # print(action)
             state.do_move(action)
 
         action_probs, _ = self._policy(state)
@@ -95,15 +94,14 @@ class MCTS(object):
         node.expand(action_probs)
         # Evaluate the leaf node by random rollout
         # take time rollouts and average to get leaf value
-        leaf_value = state.run_until_end()
+        leaf_value = state.run_episode()
 
-        #print(f"action:{action}    value:{leaf_value}")
         # Update value and visit count of nodes in this traversal.
         node.update_recursive(leaf_value)
 
-    def get_move(self, state, vehicle, waypoints):
+    def get_move(self, state):
         for n in range(self._n_playout):
-            state.reset(vehicle, waypoints)
+            state.reset()
             self._playout(state)
             #print(f"play out:{n}")
         for action,node in self._root._children.items():
@@ -132,8 +130,8 @@ class MCTSPlayer(object):
     def reset_player(self):
         self.mcts.update_with_move(-1)
 
-    def get_action(self, state, vehicle, waypoints):
-        move = self.mcts.get_move(state, vehicle, waypoints)
+    def get_action(self, state):
+        move = self.mcts.get_move(state)
         self.mcts.update_with_move(-1)
         return move
 

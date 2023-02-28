@@ -12,7 +12,7 @@ from Module.mcts_pure import MCTSPlayer as MCTS_Pure
 import numpy as np
 from gym_carla.envs import carla_env
 from utils.process import start_process, kill_process
-from dynamics.env import Dynamics_Env
+from kinematics.model import Env_model
 import cv2
 import json
 import os
@@ -49,7 +49,6 @@ def Env_init():
 
 def run():
     start_process(show=False)
-    dynamics_env = Dynamics_Env()
     mcts_player = MCTS_Pure(c_puct=1, n_playout=500)
     do = True
     try:
@@ -61,14 +60,18 @@ def run():
             if num > 500:
                 do = False
             done = False
-            move = 0
+            move = [0,0]
             car_env = Env_init()
+            vehicle = []
+            vehicle.append(car_env.ego)
             while not done:
-                print(f"num:{num}")
                 next_obs, reward, done, info = car_env.step(move)
+                print(f"num:{num}")
+                state = Env_model(vehicle)
+                move = mcts_player.get_action(state)
+                del state
 
                 if car_env.time_step % 10 == 0:
-                    move = mcts_player.get_action(dynamics_env, car_env.ego, car_env.waypoints)
                     #print(f"move:{move}")
                     # 保存观测信息
                     img = cv2.cvtColor(next_obs.front_view, cv2.COLOR_BGR2RGB)

@@ -7,7 +7,7 @@ import queue
 
 
 class Dynamics_Env():
-    """a dynamics env of carla"""
+    """a kinematics env of carla"""
     def __int__(self):
         self.origin_pos = None
         self.availables = list(itertools.product(np.array([0.5, 0.3, 0, -0.3]), np.array([0, -0.2, 0.2, -0.4, 0.4])))

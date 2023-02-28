@@ -16,7 +16,9 @@ policynet
 
 网络的输入：
 
-img：3*256 **256
+栅格地图：
 
 state：ve,re,vo,ro,d,theta 6
+
+
 

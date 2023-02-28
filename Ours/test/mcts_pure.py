@@ -13,7 +13,9 @@ from Module.mcts_pure import MCTSPlayer as MCTS_Pure
 import numpy as np
 from gym_carla.envs import carla_env
 from utils.process import start_process,kill_process
-from dynamics.env import Dynamics_Env
+from kinematics.model import Env_model
+import matplotlib.pyplot as plt
+
 
 def Env_init():
     # parameters for the gym_carla environment
@@ -22,8 +24,6 @@ def Env_init():
         'display_size': 256,  # screen size of bird-eye render
         'max_past_step': 1,  # the number of past steps to draw
         'dt': 0.05,  # time interval between two frames
-        'discrete_acc': np.arange(-5,5,1),  # discrete value of accelerations
-        'discrete_steer': np.arange(-5,5,1) / 10,  # discrete value of steering angles
         'ego_vehicle_filter': 'vehicle.lincoln*',  # filter for defining ego vehicle
         'opponent_vehicle_filter': 'vehicle.lincoln*',  # filter for defining ego vehicle
         'port': 2000,  # connection port
@@ -36,10 +36,9 @@ def Env_init():
         'desired_speed': 10,  # desired speed (m/s)
         'max_ego_spawn_times': 200,  # maximum times to spawn ego vehicle
         'display_route': True,  # whether to render the desired route
-        'ego_transform': (59.9, -7.6, -179.1),#(2.2, 77.1, -88.1),
-        'target_transform': (5, -50, -89.3),
-        'opponent_transform': (2.2, 30, -88.1), #(59.9, -7.6, -179.1),
-        'opponent_add': True
+        'ego_transform': (2.2, 22.1, -88.1),
+        'barrier_transform': (48.6,-7.8,-179.0),
+        'target_transform': (4, -45, -89.3),
     }
     env = carla_env.CarlaEnv(params)
     env.reset()
@@ -47,22 +46,33 @@ def Env_init():
 
 def run():
     start_process(show=True)
-    #model_file = 'current_policy.model'
-    car_env = Env_init()
-    dynamics_env = Dynamics_Env()
+    car_env = Env_init() #carla env
+    vehicle = []
+    ap_vehicle = []
+    vehicle.append(car_env.ego) #控制的智能体
+    ap_vehicle.append(car_env.barrier) #自动驾驶的智能体
+    time = []
+    v = []
+    barrier_v = []
+    target_v = []
     try:
-
-
-        # uncomment the following line to play with pure MCTS (it's much weaker even with a larger n_playout)
-        mcts_player = MCTS_Pure(c_puct=0.5, n_playout=5000)
+        mcts_player = MCTS_Pure(c_puct=0.1, n_playout=200)
         done = False
-        move = 2
+        move = 0
         while not done:
             next_obs, reward, done, info = car_env.step(move)
-            done = False
-            if car_env.time_step % 10 == 0:
-                move = mcts_player.get_action(dynamics_env, car_env.ego, car_env.waypoints)
+
+            if car_env.time_step % 5 == 0:
+                state = Env_model(vehicle, car_env.waypoints[0:2],ap_vehicle) #动力学仿真环境
+                move = mcts_player.get_action(state)
+                del state
                 print(f"move:{move}")
+
+                # 绘图数据
+                time.append(car_env.time_step*0.02)
+                v.append(car_env.v_now)
+                barrier_v.append(car_env.barrier_v)
+                target_v.append(move)
         print("done!")
             
     except KeyboardInterrupt:
@@ -70,8 +80,15 @@ def run():
     finally:
         car_env._set_synchronous_mode(False)
         kill_process()
+        plt.title('speed curve', fontsize=15)  # 标题，并设定字号大小
+        plt.xlabel(u'time(s)', fontsize=10)  # 设置x轴，并设定字号大小
+        plt.ylabel(u'speed(m/s)', fontsize=10)  # 设置y轴，并设定字号大小
 
-
+        plt.plot(time,v,color='#1E90FF',linewidth=2.0,linestyle='-',marker='o',label='ego agent')
+        plt.plot(time, barrier_v, color='#FFA500', linewidth=2.0, linestyle='-', marker='D', label='barrier agent')
+        plt.plot(time, target_v, color='#6A5ACD', linewidth=2.0, linestyle=':', marker='s', label='target speed')
+        plt.legend(loc='best')  # 图例展示位置，数字代表第几象限3
+        plt.show()
 
 if __name__ == '__main__':
     run()

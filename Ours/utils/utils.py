@@ -25,26 +25,6 @@ class AgentState:
         self.acc = carla.Vector3D()
         self.pos = carla.Transform()
 
-def array2transform(array):
-    trans = carla.Transform()
-    trans.location.x = array[0]
-    trans.location.y = array[1]
-    trans.location.z = array[2] + 0.05
-    trans.rotation.pitch = array[3]
-    trans.rotation.yaw = array[4]
-    trans.rotation.roll = array[5]
-    return trans
-
-def transform2array(trans):
-    array = np.zeros(6)
-    array[0] = trans.location.x
-    array[1] = trans.location.y
-    array[2] = trans.location.z
-    array[3] = trans.rotation.pitch
-    array[4] = trans.rotation.yaw
-    array[5] = trans.rotation.roll
-    return array
-
 #some para of the exp
 class Mypara:
     """
@@ -228,7 +208,7 @@ if __name__ == '__main__':
     #a = carla.Vector3D(1,2,3)
     #b = np.array([a.x,a.y,a.z])
     #print(b)
-    a =Queue(maxsize=5)
+    a = Queue(maxsize=5)
     x = AgentState()
     a.put([2])
     a.put(x)

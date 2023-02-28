@@ -4,6 +4,12 @@ car2:location:(59.9,-7.6,-179.1) (54.8,-7.7,-179.0) (48.6,-7.8,-179.0)
 
 destination:(8.0,-54.4,-89.3)
 
+        'ego_transform': (2.2, 77.1, -88.1),
+        'target_transform': (9, -50, -89.3),
+        self.barrier = carla.Transform(
+            carla.Location(x=params['ego_transform'][0], y=params['ego_transform'][1]-20, z=0.2),
+            carla.Rotation(yaw=params['ego_transform'][2]))
+
 场景二：十字路口右转并道
 car1：(8.8,-78,-88.7) (9.1,-92.1,-88.6)
 car2：(-33,-131,0.7) (-24.1,-131,0.6)
