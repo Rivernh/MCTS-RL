@@ -78,7 +78,15 @@ except IndexError:
 # ==============================================================================
 # -- imports -------------------------------------------------------------------
 # ==============================================================================
-
+import sys
+sys.path.insert(0,r'/home/ylh/MCTS-RL/CARLA')
+sys.path.insert(0,r'/home/ylh/MCTS-RL/Ours')
+from Module.mcts_pure import MCTSPlayer as MCTS_Pure
+import numpy as np
+from gym_carla.envs import carla_env
+from utils.process import start_process,kill_process
+from kinematics.model import Env_model
+import matplotlib.pyplot as plt
 
 import carla
 
@@ -1189,6 +1197,7 @@ def game_loop(args):
         client.set_timeout(20.0)
 
         sim_world = client.get_world()
+        sim_world = client.load_world('Town03')
         if args.sync:
             original_settings = sim_world.get_settings()
             settings = sim_world.get_settings()
@@ -1321,5 +1330,6 @@ def main():
 
 
 if __name__ == '__main__':
+    start_process(show=True)
 
     main()

@@ -208,25 +208,13 @@ class CarlaEnv(gym.Env):
         v_now = math.sqrt(v_now.x ** 2 + v_now.y ** 2)
         self.barrier_v = v_now
 
-        temp_target = self.waypoints[1]  #
-        car_mat = self.ego.get_transform().get_matrix()
-        car_dir = np.array([car_mat[0][0], car_mat[1][0]])
-        s_dir = np.array([temp_target[0] - car_mat[0][3], temp_target[1] - car_mat[1][3]])
-        cos_theta = np.dot(car_dir, s_dir) / (np.linalg.norm(car_dir) * np.linalg.norm(s_dir))
-        left_right = abs(np.cross(car_dir, s_dir)) / np.cross(car_dir, s_dir)
-        self.angle = np.arccos(cos_theta) * left_right
-
-        steer = self.angle * 1.5
-        if steer > 0.9:
-            steer = 0.9
-        elif steer < -0.9:
-            steer = -0.9
 
         v_now = self.ego.get_velocity()
         v_now = math.sqrt(v_now.x ** 2 + v_now.y ** 2)
         self.v_now = v_now
 
-        v_cmd = action
+        v_cmd = action[0]
+        steer = action[1]
         delta = self.PID.run(v_cmd, v_now)
         self.cmd += delta
         # print(f"current speed:{v_now}, delta:{delta},cmd:{self.cmd},step:{self.time_step}")
@@ -254,14 +242,17 @@ class CarlaEnv(gym.Env):
         while len(self.vehicle_polygons) > self.max_past_step:
             self.vehicle_polygons.pop(0)
 
-        self.waypoints = []
-        self.routeplanner = GlobalRoutePlanner(self.map, 3)
+        waypoints = []
         self.temp = self.routeplanner.trace_route(self.ego.get_transform().location, self.target_transform.location)
         for i, (waypoint, _) in enumerate(self.temp):
-            self.waypoints.append(
-                [waypoint.transform.location.x, waypoint.transform.location.y, waypoint.transform.rotation.yaw])
-
-        self.waypoints = self.waypoints[1:]
+            waypoints.append(
+                np.array([waypoint.transform.location.x, waypoint.transform.location.y, waypoint.transform.rotation.yaw]))
+        if len(waypoints) <= (len(self.waypoints) + 1):
+            if len(waypoints) > 1:
+                if (waypoints[-2] == self.waypoints[-2]).all:
+                    self.waypoints = waypoints[1:]
+            else:
+                self.waypoints = waypoints[1:]
 
         # state information
         info = {
@@ -274,11 +265,8 @@ class CarlaEnv(gym.Env):
 
         spectator = self.world.get_spectator()
         transform = self.ego.get_transform()
-        spectator.set_transform(carla.Transform(transform.location + carla.Location(z=50),
+        spectator.set_transform(carla.Transform(transform.location + carla.Location(z=100),
                                                 carla.Rotation(pitch=-90)))
-        # print(f"pos yaw:{transform.rotation.yaw / 180 *math.pi}")
-        # yaw = get_speed_yaw(self.ego)
-        # print(f"speed yaw:{yaw}")
 
         return (self._get_obs(), self._get_reward(), self._terminal(), copy.deepcopy(info))
 
@@ -529,9 +517,9 @@ class CarlaEnv(gym.Env):
             return True
 
         # If out of lane
-        dis, _ = get_lane_dis(self.waypoints, ego_x, ego_y)
-        if abs(dis) > self.out_lane_thres:
-            return True
+        #, _ = get_lane_dis(self.waypoints, ego_x, ego_y)
+        #if abs(dis) > self.out_lane_thres:
+        #    return True
         # print(f"dis:{dis}")
 
         return False

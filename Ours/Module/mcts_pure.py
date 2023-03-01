@@ -31,7 +31,7 @@ class TreeNode(object):
     def __init__(self, parent, prior_p):
         self._parent = parent
         self._children = {}  # a map from action to TreeNode
-        self._n_visits = np.finfo(float).eps  #avoid 0 to in the denominator
+        self._n_visits = np.finfo(float).eps #avoid 0 to in the denominator
         self._Q = np.finfo(float).eps
         self._u = 0
         self._P = prior_p
@@ -104,8 +104,8 @@ class MCTS(object):
             state.reset()
             self._playout(state)
             #print(f"play out:{n}")
-        for action,node in self._root._children.items():
-            print(f"action:{action}   time:{node._n_visits}   value:{node._Q / node._n_visits}")
+        #for action,node in self._root._children.items():
+        #    print(f"action:{action}   time:{node._n_visits}   value:{node._Q / node._n_visits}")
         return max(self._root._children.items(),
                    key=lambda act_node: act_node[1]._n_visits)[0]
 
