@@ -86,7 +86,7 @@ def get_lane_center(map,location):
 #     if abs(yaw_diff) < 90:
 #         yaw_diff /= 90
 #     else:
-#         # The current state is not stable, deprecate it
+#         # The current obs is not stable, deprecate it
 #         yaw_diff = np.sign(yaw_diff)
 #
 #     return yaw_diff

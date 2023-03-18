@@ -110,7 +110,7 @@ ARGS.add_argument(
 ARGS.add_argument(
     '--stride', type=int,
     default=10,
-    help='The number of upfront waypoints each state should include')
+    help='The number of upfront waypoints each obs should include')
 ARGS.add_argument(
     '--buffer-size', type=int,
     default=30,

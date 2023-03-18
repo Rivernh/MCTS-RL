@@ -23,7 +23,7 @@ class Net(nn.Module):
     def __init__(self, vector_length, n_action_available):
         super(Net, self).__init__()
 
-        #the dim of imput img and state vector
+        #the dim of imput img and obs vector
         self.vector_length = vector_length
         self.n_action_available = n_action_available
 
@@ -31,8 +31,8 @@ class Net(nn.Module):
         net structure
         img*--C--C--C--||--|--|--@policy
                        ||
-            state#--|--||--|--|--$value
-            state:ve,gama_e,vo,d,theta,gama_o 6d array
+            obs#--|--||--|--|--$value
+            obs:ve,gama_e,vo,d,theta,gama_o 6d array
         """
         # common layers
         self.out_dim = 256
@@ -50,7 +50,7 @@ class Net(nn.Module):
         self.act_fc1 = nn.Linear(128 + self.out_dim*8*8, 1024)
         self.act_fc2 = nn.Linear(1024, n_action_available)
 
-        # state value layers
+        # obs value layers
         self.val_fc1 = nn.Linear(128 + self.out_dim*self.img_width*self.img_height, 64)
         self.val_fc2 = nn.Linear(64, 1)
 
@@ -79,7 +79,7 @@ class Net(nn.Module):
         x_logit = self.act_fc2(x_act)
         x_act = F.log_softmax(x_logit)
 
-        # state value layers
+        # obs value layers
         x_val = F.leaky_relu(self.val_fc1(x), inplace=True)
         x_val = F.tanh(self.val_fc2(x_val))
         return x_logit, x_act, x_val
@@ -107,7 +107,7 @@ class PolicyValueNet():
     def policy_value(self, img_batch, state_batch):
         """
         input: a batch of states and imgs
-        output: a batch of action probabilities and state values
+        output: a batch of action probabilities and obs values
         """
         if self.use_gpu:
             img_batch = Variable(torch.FloatTensor(np.array(img_batch)).cuda())
@@ -127,7 +127,7 @@ class PolicyValueNet():
         """
         input: board
         output: a list of (action, probability) tuples for each available
-        action and the score of the board state
+        action and the score of the board obs
         """
         legal_positions = np.arange(100)
         if self.use_gpu:

@@ -105,7 +105,7 @@ class Assistagent(BasicAgent):
         input para:
         action:all candidate action list
         img:current a w*h img
-        state:current state vector including ego agent and another agent also drived by my algorithm
+        obs:current obs vector including ego agent and another agent also drived by my algorithm
         output para:legal action list
         """
         legal_actions = action_available
@@ -184,7 +184,7 @@ class MCTSagent(BasicAgent):
         input para:
         action:all candidate action list
         img:current a w*h img
-        state:current state vector including ego agent and another agent also drived by my algorithm
+        obs:current obs vector including ego agent and another agent also drived by my algorithm
         output para:legal action list
         """
         legal_actions = action_available

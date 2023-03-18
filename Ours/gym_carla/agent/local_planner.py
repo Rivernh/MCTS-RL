@@ -248,7 +248,7 @@ class LocalPlanner:
         # check possible obstacles
         vehicle = self._vehicle_hazard(vehicle_list)
 
-        # check for the state of the traffic lights
+        # check for the obs of the traffic lights
         light_state = self._is_light_red_us_style(lights_list)
 
         return light_state, vehicle

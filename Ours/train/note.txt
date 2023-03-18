@@ -4,11 +4,13 @@ car2:location:(59.9,-7.6,-179.1) (54.8,-7.7,-179.0) (48.6,-7.8,-179.0)
 
 destination:(8.0,-54.4,-89.3)
 
-        'ego_transform': (2.2, 77.1, -88.1),
-        'target_transform': (9, -50, -89.3),
-        self.barrier = carla.Transform(
-            carla.Location(x=params['ego_transform'][0], y=params['ego_transform'][1]-20, z=0.2),
-            carla.Rotation(yaw=params['ego_transform'][2]))
+           #round
+        'ego_transform': (43.8, -7.8, -179.0),
+        'barrier_transform': (17.9, 8.7, -86.1),
+        'target_transform': (4, -45, -89.3),
+
+
+
 
 场景二：十字路口右转并道
 car1：(8.8,-78,-88.7) (9.1,-92.1,-88.6)
@@ -16,6 +18,21 @@ car2：(-33,-131,0.7) (-24.1,-131,0.6)
 
 destination: (36,-130,0.8) (73.9,-130,0.8)
 
+           #right
+        'ego_transform': (149,-30.2,90),
+        'barrier_transform': (160.5,-2.3,180.2),
+        'target_transform': (80,-5.3,180.2),
+
 场景三：无红绿灯十字路口的直行与左转的交互
 car1:(-40.6,-135.4,1.6) (-34.5,-135.3,1.6) dest1: (7.6,-176.5,-88.5)
 car2:(0.3,-180.3,91.5) (0.1,-170,91.6)   dest2: (-2.0,-93.6,91.5)
+
+
+#        'ego_transform': (-40.6,-135.4,1.6),
+        'barrier_transform': (0.3,-180.3,91.5),
+        'target_transform': (-2.0,-93.6,91.5),
+
+
+场景四：匝道合并
+car1:(-112.7,33.5,133.9) (-110.6,31.4,133.9)  dest:(-152.2,107.2,86.2)
+car2:(149.1,25.1,92.1)

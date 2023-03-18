@@ -237,7 +237,7 @@ class CarlaEnv():
     #if self.time_step % 150 == 0:
     #  plt.show()
 
-    # state information
+    # obs information
     info = {
       'waypoints': self.waypoints
     }
@@ -495,7 +495,7 @@ class CarlaEnv():
 
   def _terminal(self):
     """Calculate whether to terminate the current episode."""
-    # Get ego state
+    # Get ego obs
     if self.time_step > 1000:
       pass
     ego_x, ego_y = get_pos(self.ego)

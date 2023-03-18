@@ -92,23 +92,19 @@ class CarlaEnv(gym.Env):
         self.reset_step = 0
         self.total_step = 0
 
-        self.ego_transform = carla.Transform(
-            carla.Location(x=params['ego_transform'][0], y=params['ego_transform'][1], z=0.2),
-            carla.Rotation(yaw=params['ego_transform'][2]))
-        self.ego_transform = self.map.get_waypoint(self.ego_transform.location).transform
-        self.ego_transform.location.z = 0.2
+        trans = params['ego_transform']
+        self.ego_transform = []
+        for i in range(len(trans)):
+            ego_transform = carla.Transform(
+                carla.Location(x=trans[i][0], y=trans[i][1], z=0.2),
+                carla.Rotation(yaw=trans[i][2]))
+            ego_transform = self.map.get_waypoint(ego_transform.location).transform
+            ego_transform.location.z = 4.2
+            self.ego_transform.append(ego_transform)
 
         self.target_transform = carla.Transform(
             carla.Location(x=params['target_transform'][0], y=params['target_transform'][1], z=0.2),
             carla.Rotation(yaw=params['target_transform'][2]))
-
-        #self.barrier = carla.Transform(
-        #    carla.Location(x=params['ego_transform'][0], y=params['ego_transform'][1]-20, z=0.2),
-        #    carla.Rotation(yaw=params['ego_transform'][2]))
-
-        self.barrier = carla.Transform(
-            carla.Location(x=params['barrier_transform'][0], y=params['barrier_transform'][1], z=0.2),
-            carla.Rotation(yaw=params['barrier_transform'][2]))
 
         # Initialize the renderer
         self._init_renderer()
@@ -136,22 +132,30 @@ class CarlaEnv(gym.Env):
         while count > 0:
             if self._try_spawn_random_vehicle_at(random.choice(self.vehicle_spawn_points), number_of_wheels=[4]):
                 count -= 1
-        self._try_spawn_random_vehicle_at(self.barrier, number_of_wheels=[4])
         # Get actors polygon list
         self.vehicle_polygons = []
         vehicle_poly_dict = self._get_actor_polygons('vehicle.*')
         self.vehicle_polygons.append(vehicle_poly_dict)
 
-        # Spawn the ego vehicle
-        ego_spawn_times = 0
-        while True:
-            if ego_spawn_times > self.max_ego_spawn_times:
-                self.reset()
-            if self._try_spawn_ego_vehicle_at(self.ego_transform):
-                break
-            else:
-                ego_spawn_times += 1
-                time.sleep(0.1)
+        self.egos = []
+        # Spawn the ego vehicles
+        for i in range(len(self.ego_transform)):
+            ego_spawn_times = 0
+            while True:
+                if ego_spawn_times > self.max_ego_spawn_times:
+                    self.reset()
+                if i == 0:
+                    if self._try_spawn_ego_vehicle_at(self.ego_transform[i]):
+                        break
+                    else:
+                        ego_spawn_times += 1
+                        time.sleep(0.1)
+                else:
+                    if self._try_spawn_other_vehicle_at(self.ego_transform[i]):
+                        break
+                    else:
+                        ego_spawn_times += 1
+                        time.sleep(0.1)
 
         # Add collision sensor
         self.collision_sensor = self.world.spawn_actor(self.collision_bp, carla.Transform(), attach_to=self.ego)
@@ -182,81 +186,86 @@ class CarlaEnv(gym.Env):
         # Update timesteps
         self.time_step = 0
         self.reset_step += 1
-        self.PID = PID()
+        self.PID1 = PID()
+        self.PID2 = PID()
+        self.PID = [self.PID1,self.PID2]
 
         # Enable sync mode
         self.settings.synchronous_mode = True
         self.world.apply_settings(self.settings)
 
-        self.waypoints = []
-        self.routeplanner = GlobalRoutePlanner(self.map, 3)
-        self.temp = self.routeplanner.trace_route(self.ego.get_transform().location, self.target_transform.location)
-        for i, (waypoint, _) in enumerate(self.temp):
-            self.waypoints.append(
-                [waypoint.transform.location.x, waypoint.transform.location.y, waypoint.transform.rotation.yaw])
+        self.waypoints_all = []
+        for i in range(len(self.egos)):
+            self.waypoints = []
+            self.routeplanner = GlobalRoutePlanner(self.map, 5)
+            self.temp = self.routeplanner.trace_route(self.egos[i].get_transform().location, self.target_transform.location)
+            for _, (waypoint, _) in enumerate(self.temp):
+                self.waypoints.append(
+                    [waypoint.transform.location.x, waypoint.transform.location.y, waypoint.transform.rotation.yaw])
+            self.waypoints_all.append(self.waypoints)
 
         # Set ego information for render
         self.birdeye_render.set_hero(self.ego, self.ego.id)
 
-        self.cmd = 0
+        self.cmd = list(np.zeros(len(self.egos)))
 
         return self._get_obs()
 
     def step(self, action):
+        self.v_now = []
+        acts = []
+        for i in range(len(self.egos)):
+            v_now = self.egos[i].get_velocity()
+            v_now = math.sqrt(v_now.x ** 2 + v_now.y ** 2)
+            self.v_now.append(v_now)
 
-        v_now = self.barrier.get_velocity()
-        v_now = math.sqrt(v_now.x ** 2 + v_now.y ** 2)
-        self.barrier_v = v_now
+            v_cmd = action[i][0]
+            steer = action[i][1]
+            delta = self.PID[i].run(v_cmd, v_now)
+            self.cmd[i] += delta
+            # print(f"current speed:{v_now}, delta:{delta},cmd:{self.cmd},step:{self.time_step}")
 
+            if self.cmd[i] > 0:
+              throttle = self.cmd[i]
+              if throttle > 1.0:
+                throttle = 1.0
+              brake = 0
+            else:
+              throttle = 0
+              brake = -self.cmd[i]
+              if brake > 1.0:
+                brake = 1.0
+            # Apply control
+            # print(f"acc:{float(throttle)}    steer:{float(steer)}")
+            act = carla.VehicleControl(throttle=float(throttle), steer=float(steer), brake=float(brake))
+            acts.append(act)
 
-        v_now = self.ego.get_velocity()
-        v_now = math.sqrt(v_now.x ** 2 + v_now.y ** 2)
-        self.v_now = v_now
-
-        v_cmd = action[0]
-        steer = action[1]
-        delta = self.PID.run(v_cmd, v_now)
-        self.cmd += delta
-        # print(f"current speed:{v_now}, delta:{delta},cmd:{self.cmd},step:{self.time_step}")
-
-        if self.cmd > 0:
-          throttle = self.cmd
-          if throttle > 1.0:
-            throttle = 1.0
-          brake = 0
-        else:
-          throttle = 0
-          brake = -self.cmd
-          if brake > 1.0:
-            brake = 1.0
-        # Apply control
-        # print(f"acc:{float(throttle)}    steer:{float(steer)}")
-        act = carla.VehicleControl(throttle=float(throttle), steer=float(steer), brake=float(brake))
-        self.ego.apply_control(act)
-
+            # Append actors polygon list
+            #vehicle_poly_dict = self._get_actor_polygons('vehicle.*')
+           # self.vehicle_polygons.append(vehicle_poly_dict)
+            #while len(self.vehicle_polygons) > self.max_past_step:
+             #   self.vehicle_polygons.pop(0)
+        for i in range(len(self.egos)):
+            self.egos[i].apply_control(acts[i])
+        #self.ego.apply_control(acts[0])
         self.world.tick()
-
-        # Append actors polygon list
         vehicle_poly_dict = self._get_actor_polygons('vehicle.*')
         self.vehicle_polygons.append(vehicle_poly_dict)
         while len(self.vehicle_polygons) > self.max_past_step:
-            self.vehicle_polygons.pop(0)
+           self.vehicle_polygons.pop(0)
+        self.waypoints_all = []
+        for i in range(len(self.egos)):
+            self.waypoints = []
+            self.routeplanner = GlobalRoutePlanner(self.map, 5)
+            self.temp = self.routeplanner.trace_route(self.egos[i].get_transform().location, self.target_transform.location)
+            for _, (waypoint, _) in enumerate(self.temp):
+                self.waypoints.append(
+                    [waypoint.transform.location.x, waypoint.transform.location.y, waypoint.transform.rotation.yaw])
+            self.waypoints_all.append(self.waypoints)
 
-        waypoints = []
-        self.temp = self.routeplanner.trace_route(self.ego.get_transform().location, self.target_transform.location)
-        for i, (waypoint, _) in enumerate(self.temp):
-            waypoints.append(
-                np.array([waypoint.transform.location.x, waypoint.transform.location.y, waypoint.transform.rotation.yaw]))
-        if len(waypoints) <= (len(self.waypoints) + 1):
-            if len(waypoints) > 1:
-                if (waypoints[-2] == self.waypoints[-2]).all:
-                    self.waypoints = waypoints[1:]
-            else:
-                self.waypoints = waypoints[1:]
-
-        # state information
+        # obs information
         info = {
-            'waypoints': self.waypoints
+            'waypoints': self.waypoints_all
         }
 
         # Update timesteps
@@ -267,8 +276,10 @@ class CarlaEnv(gym.Env):
         transform = self.ego.get_transform()
         spectator.set_transform(carla.Transform(transform.location + carla.Location(z=100),
                                                 carla.Rotation(pitch=-90)))
+        #for i in range(len(self.egos)):
+        #    self.draw_waypoints(self.waypoints_all[i])
 
-        return (self._get_obs(), self._get_reward(), self._terminal(), copy.deepcopy(info))
+        return (self._get_obs(), _, self._terminal(), _)
 
     def seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
@@ -331,11 +342,11 @@ class CarlaEnv(gym.Env):
         vehicle = self.world.try_spawn_actor(blueprint, transform)
         self.barrier = vehicle
         if vehicle is not None:
-            vehicle.set_autopilot()
+            #vehicle.set_autopilot()
             return True
         return False
 
-    def _try_spawn_opponent_vehicle_at(self, transform):
+    def _try_spawn_other_vehicle_at(self, transform):
         """Try to spawn the ego vehicle at specific transform.
     Args:
       transform: the carla transform object.
@@ -354,14 +365,13 @@ class CarlaEnv(gym.Env):
             else:
                 overlap = True
                 break
-
+        #blueprint = self._create_vehicle_bluepprint('vehicle.*', number_of_wheels=[4])
         if not overlap:
-            vehicle = self.world.try_spawn_actor(self.opponent_bp, transform)
-        #  print(vehicle)
+            vehicle = self.world.try_spawn_actor(self.ego_bp, transform)
 
         if vehicle is not None:
-            self.opponent = vehicle
-            self.actorlist.append(self.opponent)
+            self.egos.append(vehicle)
+            self.actorlist.append(vehicle)
             return True
 
         return False
@@ -392,6 +402,7 @@ class CarlaEnv(gym.Env):
 
         if vehicle is not None:
             self.ego = vehicle
+            self.egos.append(self.ego)
             self.actorlist.append(self.ego)
             return True
 
@@ -507,7 +518,7 @@ class CarlaEnv(gym.Env):
 
     def _terminal(self):
         """Calculate whether to terminate the current episode."""
-        # Get ego state
+        # Get ego obs
         if self.time_step > 1000:
             pass
         ego_x, ego_y = get_pos(self.ego)
@@ -538,3 +549,9 @@ class CarlaEnv(gym.Env):
             actor.destroy()
         # print(self.actorlist)
         # print(self.world.get_actors().filter('sensor.camera.rgb'))
+
+    def draw_waypoints(self, waypoints):
+        for waypoint in waypoints:
+            self.world.debug.draw_point(carla.Location(x=waypoint[0],y=waypoint[1],z=1),
+                                    color=carla.Color(r=0, g=255, b=0),
+                                    life_time=0.1)

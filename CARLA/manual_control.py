@@ -573,7 +573,7 @@ class KeyboardControl(object):
                     current_lights |= carla.VehicleLightState.Reverse
                 else: # Remove the Reverse flag
                     current_lights &= ~carla.VehicleLightState.Reverse
-                if current_lights != self._lights: # Change the light state only if necessary
+                if current_lights != self._lights: # Change the light obs only if necessary
                     self._lights = current_lights
                     world.player.set_light_state(carla.VehicleLightState(self._lights))
             elif isinstance(self._control, carla.WalkerControl):

@@ -23,7 +23,7 @@ def Env_init():
         'number_of_vehicles': 0,
         'display_size': 256,  # screen size of bird-eye render
         'max_past_step': 1,  # the number of past steps to draw
-        'dt': 0.05,  # time interval between two frames
+        'dt': 0.1,  # time interval between two frames
         'discrete_acc': np.arange(-5,5,1),  # discrete value of accelerations
         'discrete_steer': np.arange(-5,5,1) / 10,  # discrete value of steering angles
         'ego_vehicle_filter': 'vehicle.lincoln*',  # filter for defining ego vehicle
@@ -81,7 +81,7 @@ def run():
                     state = {"ve": next_obs.speed, "gama_e": 1.0, "vo": 0, "gama_o": 0.1, "dis": 100, "theta": 0}
                     dict_json = json.dumps(state)  # 转化为json格式文件
                     # 将json文件保存为.json格式文件
-                    with open('../data/state/' + f'{num}.json', 'w+') as file:
+                    with open('../data/obs/' + f'{num}.json', 'w+') as file:
                         file.write(dict_json)
                     num += 1
                 if num > 10:

@@ -16,7 +16,7 @@ def my_get_info(vehicle):
     front = [(wheels[0].position.x + wheels[1].position.x) / 2, (wheels[0].position.y + wheels[1].position.y) / 2]
     back = [(wheels[2].position.x + wheels[2].position.x) / 2, (wheels[3].position.y + wheels[3].position.y) / 2]
     wheel_base = math.sqrt((front[0]-back[0])**2 + (front[1]-back[1])**2) / 100
-    info = (x, y, yaw, wheel_base, l, w)
+    info = [x, y, yaw, wheel_base, l, w]
     return info
 
 def my_caculate(a, b, p):  # 判断p在ab上的投影是否在线段上 0不在 1在 2在端点
@@ -97,7 +97,7 @@ class UGV_model:
 
         self.dt = T  # decision time periodic
 
-    def update(self, vt, deltat):  # update ugv's state
+    def update(self, vt, deltat):  # update ugv's obs
         self.v = vt
 
         dx = self.v * np.cos(self.theta)
@@ -126,21 +126,17 @@ class UGV_model:
         plt.pause(0.008)
 
 class ap_model:
-    def __init__(self, vehicle,dt=0.1):  # L:wheel base
-        self.vehicle = vehicle
-        info = my_get_info(self.vehicle)
+    def __init__(self, info, v, dt=0.2):  # L:wheel base
         self.x = info[0]  # X
         self.y = info[1]  # Y
         self.theta = info[2]  # headding
         self.wb = info[3]  # wheel base
-        self.l = info[4]
-        self.w = info[5]
+        self.l = info[4] + 0.5
+        self.w = info[5] + 0.5
         self.dt = dt
+        self.v = v
 
-        v = self.vehicle.get_velocity()
-        self.v = math.sqrt(v.x ** 2 + v.y ** 2)
-
-    def update(self):  # update ugv's state
+    def update(self):  # update ugv's obs
         dx = self.v * np.cos(self.theta)
         dy = self.v * np.sin(self.theta)
 
@@ -159,10 +155,10 @@ class ap_model:
         self.box = [left_bottom,right_bottom,right_up,left_up]
 
 class Env_model(object):
-    def __init__(self, vehicle, wpt, ap_vehicle = None, dt = 0.1):
+    def __init__(self, vehicle, wpt, ap_vehicle, dt = 0.2):
         #self.availables = list(itertools.product(np.array([0,3,6,9,12]), np.array([0,-0.2,-0.4,0.2,0.4])))
         #self.availables = np.array([0,2.5,5,7.5,10])
-        self.availables = list(itertools.product(np.array([0,2.5,5,7.5,10]), np.array([0, -0.1, -0.2, 0.1, 0.2])))
+        self.availables = list(np.arange(25))
         self.availables_len = 25
         self.dt = dt
         self.vehicle = vehicle
@@ -170,10 +166,27 @@ class Env_model(object):
         self.vehicle_num = len(self.vehicle)
         self.AP_num = len(self.ap_vehicle)
         self.total = self.vehicle_num + self.AP_num
-        self.step = None
         self.crash = np.zeros(self.vehicle_num)
         self.wpt = wpt
-        #print(f"vehicle_num:{self.vehicle_num}")
+        self.UGV_info = []
+        self.AP_info = []
+        self.speed_init = []
+        self.speed_temp = []
+        self.acc_init = [0]
+        #print(self.vehicle_num)
+        while len(self.UGV_info) < self.vehicle_num:
+            v = self.vehicle[len(self.UGV_info)].get_velocity()
+            v = math.sqrt(v.x ** 2 + v.y ** 2)
+            self.speed_init.append(v)
+            self.speed_temp.append(v)
+            info = my_get_info(self.vehicle[len(self.UGV_info)])
+            self.UGV_info.append(info)
+
+        while len(self.AP_info) < self.AP_num:
+            v = self.ap_vehicle[len(self.AP_info)].get_velocity()
+            v = math.sqrt(v.x ** 2 + v.y ** 2)
+            info = my_get_info(self.ap_vehicle[len(self.AP_info)])
+            self.AP_info.append([info,v])
 
     def reset(self):
         self.step = 0
@@ -183,111 +196,118 @@ class Env_model(object):
         self.speed = []
         self.acc = [0]
         while len(self.UGV) < self.vehicle_num:
-            v = self.vehicle[len(self.UGV)].get_velocity()
-            v = math.sqrt(v.x ** 2 + v.y ** 2)
-            self.speed.append(v)
-            info = my_get_info(self.vehicle[len(self.UGV)])
-            self.UGV.append(UGV_model(info, self.dt))
+            self.speed.append(self.speed_init[len(self.UGV)])
+            self.UGV.append(UGV_model(self.UGV_info[len(self.UGV)], self.dt))
             #if len(self.speed):
             #    print("successfully add speed!")
 
         while len(self.AP) < self.AP_num:
-            self.AP.append(ap_model(self.ap_vehicle[len(self.AP)]))
+            self.AP.append(ap_model(self.AP_info[len(self.AP)][0],self.AP_info[len(self.AP)][1]))
             #if len(self.speed):
             #    print("successfully add speed!")
 
     # do a move according to the action for one car
-    def do_move(self, action):
+    def do_move(self, action, rank):
         v = action[0]
         steer = action[1]
 
-        self.acc[0] = abs(v-self.speed[0])
-        self.UGV[0].update(v, steer)
-        self.speed[0] = v
+        #self.acc[rank] = abs(v-self.speed[rank])
+        self.UGV[rank].update(v, steer)
+        self.speed[rank] = v
         #print("move done!")
         return
 
+    #
+    def change_init(self,action,rank):
+        v = action[0]
+        steer = action[1]
+        theta = self.UGV_info[rank][2]
+
+        dx = v * np.cos(theta) * self.dt
+        dy = v * np.sin(theta) * self.dt
+        dtheta = v * np.tan(steer) / self.UGV_info[rank][3] * self.dt
+
+        self.speed_init[rank] = v
+        self.UGV_info[rank][0] += dx
+        self.UGV_info[rank][1] += dy
+        self.UGV_info[rank][2] += dtheta
+
+
     # run an episode until end keeping the speed after the action for one agent
-    def run_episode(self):
+    def run_episode(self,rank):
         while not self.end:
-            #temp = np.random.choice(self.availables_len)
-            #action = self.availables[temp]
-            #self.do_move(action)
-            self.UGV[0].update(self.speed[0], 0)
-            self.AP[0].update()
-            self.end = self.terminal()
+            for i in range(self.vehicle_num):
+                self.UGV[i].update(self.speed[i], 0)
+            for i in range(self.AP_num):
+                self.AP[i].update()
+            self.end = self.terminal(rank)
             self.step += 1
-        return self.get_reward()
+        return self.get_reward(rank)
 
     # get the reward of the action node
-    def get_reward(self):
+    def get_reward(self,rank):
         reward = []
         for i in range(self.vehicle_num):
             speed_reward = 1 - np.exp(-0.025*(self.speed[i] ** 2))
-            acc_reward = np.exp(-0.01*self.dt*(self.acc[i] ** 2))
-            acc_reward = self.acc[i] / 10
-            task_reward = self.task()
-            offset_reward = -abs(self.offset[i][1])*0.04 + -abs(self.offset[i][0])*0.01
+            #acc_reward = np.exp(-0.01*self.dt*(self.acc[i] ** 2))
+            #acc_reward = self.acc[i] / 10
+            task_reward = self.task(i)
+            #offset_reward = -abs(self.offset[i][1])*0.04 + -abs(self.offset[i][0])*0.01 #转盘
+            offset_reward = -abs(self.offset[i][1]) * 0.2 #右转 0.1
             rew = speed_reward + task_reward + offset_reward
             reward.append(rew)
 
-        return reward
+        return reward[rank]
 
-    # check if the episode is end and update the UGV state flag in the env
-    def terminal(self):
+    # check if the episode is end and update the UGV obs flag in the env
+    def terminal(self,rank):
         self.crash_check()
         self.off_track()
         #self.rang_judge()
-        if self.step >= 10:
+        if self.step >= 5:
             return True
-        if self.crash:
+        if self.crash[rank]:
             return True
         #if not self.judge[0]:
         #    return True
         return False
 
-    def task(self):
+    def task(self,rank):
         rew = 0
-        if self.crash:
-            rew += -0.5 * (10 - self.step) * 2
+        if self.crash[rank]:
+            rew += -0.5 * (10 - self.step) * 10
+        if self.speed[rank] == 0:
+            rew += -0.5 * 0.1
+
         #if not self.judge[0]:
-        #    rew += -0.5 * (10 - self.step) * 2
+        #    rew += -0.001 * (10 - self.step)
         #    print("out")
         return rew
 
     def crash_check(self):
-        crash = False
         for i in range(self.vehicle_num):
-            for j in range(self.total-1-i):
-                if i+j+1 >= self.vehicle_num:
-                    crash = overlap(self.UGV[i].box,self.AP[i+j+1-self.vehicle_num].box)
-                #与周围车辆非控制的检测
+            crash = False
+            for j in range(self.total-1):
+                if j + 1 >= self.vehicle_num:
+                    crash = overlap(self.UGV[i].box,self.AP[j+1-self.vehicle_num].box)#与周围车辆非控制的检测
                     #print(f"dis:{dis} thre:{thre}")
                 else:
-                    crash = overlap(self.UGV[i].box, self.UGV[i+j+1].box)
-                    crash = False #与其他UGV检测
-                self.crash = crash
+                    if j<i:
+                        crash = overlap(self.UGV[i].box, self.UGV[j].box)#与其他UGV检测
+                    else:
+                        crash = overlap(self.UGV[i].box, self.UGV[j+1].box)  # 与其他UGV检测
                 if crash:
                     break
+            self.crash[i] = crash
 
     def off_track(self):
         """
         计算每个智能体偏离预定轨迹的距离，来控制循迹
         """
         self.offset = []
+        d = 0
         for i in range(self.vehicle_num):
             wpt = self.wpt[i]
-            a = np.array(wpt[1][0:2])
-            b = np.array(wpt[2][0:2])
-            p = np.array([self.UGV[i].x, self.UGV[i].y])
-            s = b-a
-            c = p-a
-            if np.linalg.norm(c) * np.linalg.norm(s):
-                cos_theta = np.dot(c, s) / (np.linalg.norm(c) * np.linalg.norm(s))
-                d = np.linalg.norm(c) * math.sqrt(1-cos_theta**2)
-            else:
-                d = 0
-
             temp_target = wpt[2]  #
             yaw = self.UGV[i].theta
             car_dir = np.array([math.cos(yaw), math.sin(yaw)])
@@ -306,54 +326,6 @@ class Env_model(object):
             wpt = self.wpt[i]
             self.judge.append(inside_range(p,wpt,0.5,5))
         return
-
-
-    """检查距离判断碰撞
-    def crash_check(self):
-        crash = False
-        for i in range(self.vehicle_num):
-            for j in range(self.total-1-i):
-                if i+j+1 >= self.vehicle_num:
-                    dis = (self.UGV[i].x-self.AP[i+j+1-self.vehicle_num].x)**2 + (self.UGV[i].y-self.AP[i+j+1-self.vehicle_num].y)**2
-                    thre = (self.UGV[i].w + self.AP[i+j+1-self.vehicle_num].w)**2 + (self.UGV[i].l + self.AP[i+j+1-self.vehicle_num].l)**2
-                    if dis <= thre:
-                        crash = True
-                #与周围车辆非控制的检测
-                    #print(f"dis:{dis} thre:{thre}")
-                else:
-                    crash = False #与其他UGV检测
-                self.crash = crash
-                if crash:
-                    print("carshed!")
-                    break
-    """
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
