@@ -10,7 +10,7 @@ import sys
 
 sys.path.insert(0, r'/home/ylh/MCTS-RL/CARLA')
 sys.path.insert(0, r'/home/ylh/MCTS-RL/Ours')
-from Module.mcts.mcts_withnet import MCTSPlayer as MCTS_Pure
+from Module.mcts.mcts_withnet import MCTSPlayer
 import numpy as np
 from gym_carla.envs import carla_env
 from utils.process import start_process, kill_process
@@ -40,18 +40,29 @@ def Env_init():
         'desired_speed': 10,  # desired speed (m/s)
         'max_ego_spawn_times': 200,  # maximum times to spawn ego vehicle
         'display_route': False,  # whether to render the desired route
-        'ego_transform': [(149, -28.2, 90), (165.5, -2.3, 180.2)],
-        'target_transform': (80, -5.3, 180.2),
+        'ego_transform': [(165.5, -5.3, 180.2), (149, -28.2, 90), ],
+        'target_transform': [(96.3, -6.9, 180.2),(96.3, -6.9, 180.2)],
+        'noise': False,
+        'long':False,
+        'temp_transform':[(-0.3,-155.6,94.2),(82.7,-145.7,92.1),(150.3,-146.1,93.2),(200.7,130.7,91.1),],
+        'temp_target': [(-44,-4.2,176),(78.4,-60.7,92.1),(148,-50,93.2),(100.7,130.7,91.1),],
+        'temp_destroy':[-35,58,118,-35]
     }
     env = carla_env.CarlaEnv(params)
     env.reset()
     return env
 
+def policy_value_fn(TreeEnv):
+    """a function that takes in a obs and outputs a list of (action, probability)
+    tuples and a score for the obs"""
+    # return uniform probabilities and 0 score for pure MCTS
+    availables = np.arange(21)
+    action_probs = np.ones(len(availables))/len(availables)
+    return zip(availables, action_probs), 0
 
-def run(thre):
-    start_process(show=True)
+def run(thre,n):
+    start_process(show=False)
     car_env = Env_init()  # carla env
-    vehicle = []
     wpt = []
     ap_vehicle = []
     vehicle = car_env.egos  # 控制的智能体
@@ -59,13 +70,14 @@ def run(thre):
     time = []
     v = []
     target_v = []
-    path = './data'  # 输入文件夹地址
-    files = os.listdir(path)  # 读入文件夹
-    num = len(files)  # 统计文件夹中的文件个数
+    num = n
     count = num
+    v1 = 0
+    v2 = 0
+    judge_1 = 0
+    judge_2 = 0
     try:
-        car1 = MCTS_Pure(c_puct=5, n_playout=300)
-        car2 = MCTS_Pure(c_puct=5, n_playout=300)
+        car = MCTSPlayer(policy_value_fn,c_puct=0.2, n_playout=500,is_selfplay=1)
         done = False
         car1_move = (0, 0)
         car2_move = (0, 0)
@@ -74,35 +86,55 @@ def run(thre):
             next_obs, _, done, _ = car_env.step(move)
             wpt.clear()
             wpt_temp = car_env.waypoints_all
-            if len(wpt_temp[0]) < 3 or len(wpt_temp[1]) < 3:
-                break
+            if len(wpt_temp[0]) < 8 or len(wpt_temp[1]) < 8:
+                judge_1 = 1
+                judge_2 = 1
+                return True
             for i in range(len(wpt_temp)):
-                wpt.append(wpt_temp[i][0:3])
+                wpt.append(wpt_temp[i][2:8])
             if car_env.time_step % 2 == 0:
                 state = Env_model(vehicle, wpt, ap_vehicle, dt=0.1)  # 动力学仿真环境
 
-                car1_move,p1,v1 = car1.get_action(state, 0)
-                car2_move,p2,v2 = car2.get_action(state, 1)
+                car1_move,p1 = car.get_action(state, 0)
+                car2_move,p2 = car.get_action(state, 1)
                 move = [car1_move, car2_move]
-
+                #state.reset()
+                #v1 += state.run_episode(0)
+                #state.reset()
+                #v2 += state.run_episode(1)
+                #print(v1,v2)
                 print(f"move:{move}")
-                dic = {"x": state.UGV_info[0][0], "y": state.UGV_info[0][1],"yaw": state.UGV_info[0][2],"speed": state.speed_temp[0],
-                       "goal_x": wpt[0][2][0],"goal_y": wpt[0][2][1],"pro":list(p1),"value":list(v1)}
+                dic = {"obs":[state.UGV_info[0][0],state.UGV_info[0][1],state.UGV_info[0][2],state.speed_temp[0],
+                              wpt[0][2][0],wpt[0][2][1],0] + [state.UGV_info[1][0], state.UGV_info[1][1], state.UGV_info[1][2], state.speed_temp[1],
+                              wpt[1][2][0], wpt[1][2][1],1],
+                       "pro":list(p1) + list(p2),
+                       "value":[v1,v2]
+                       }
                 dict_json = json.dumps(dic)  # 转化为json格式文件
                 # 将json文件保存为.json格式文件
-                with open('./data/' + f'{count}.json', 'w+') as file:
+                with open('./data/data_file/' + f'{count}.json', 'w+') as file:
                     file.write(dict_json)
                 #t.sleep(0.1)
                 count += 1
-
-                dic = {"x": state.UGV_info[1][0], "y": state.UGV_info[1][1],"yaw": state.UGV_info[1][2],"speed": state.speed_temp[1],
-                       "goal_x": wpt[1][2][0],"goal_y": wpt[1][2][1],"pro":list(p2),"value":list(v2)}
+                """
+                dic = {"x": state.UGV_info[1][0],
+                       "y": state.UGV_info[1][1],
+                       "yaw": state.UGV_info[1][2],
+                       "speed": state.speed_temp[1],
+                       "goal_x": wpt[1][2][0],
+                       "goal_y": wpt[1][2][1],
+                       "obs": [state.UGV_info[1][0], state.UGV_info[1][1], state.UGV_info[1][2], state.speed_temp[1],
+                               wpt[1][2][0], wpt[1][2][1]],
+                       "pro":list(p2),
+                       "value":v2
+                       }
                 dict_json = json.dumps(dic)  # 转化为json格式文件
                 # 将json文件保存为.json格式文件
-                with open('./data/' + f'{count}.json', 'w+') as file:
+                with open('./data/data_file/' + f'{count}.json', 'w+') as file:
                     file.write(dict_json)
                 #t.sleep(0.1)
                 count += 1
+                """
                 del state
             # 绘图数据
             time.append(car_env.time_step * 0.05)
@@ -112,12 +144,42 @@ def run(thre):
             if count - num > thre:
                 done = True
         print("done!")
+        judge_1 = -1
+        judge_2 = -1
+
 
     except KeyboardInterrupt:
         print('\n\rquit')
     finally:
+        judge_1 = input("1车是否通过：-1/0/1:")
+        judge_1 = int(judge_1)
+        judge_2 = input("2车是否通过：-1/0/1:")
+        judge_2 = int(judge_2)
+        for i in range(count-num):
+            path = './data/data_file/' + f'{num+i}.json'
+            with open(path, 'r+') as file:
+                content = file.read()
+                content = json.loads(content)  # 将json格式文件转化为python的字典文件
+                pro = content['pro']
+                value = content['value']
+            obs = content['obs']
+            dic = {"obs": obs,
+                   "pro": pro,
+                   "value": [judge_1,judge_2]
+                   }
+            dict_json = json.dumps(dic)  # 转化为json格式文件
+            with open(path, 'w+') as file:
+                file.write(dict_json)
         car_env._set_synchronous_mode(False)
         kill_process()
+        num = count
+        dic = {"num": num
+               }
+        dict_json = json.dumps(dic)  # 转化为json格式文件
+        # 将json文件保存为.json格式文件
+        with open('./data/num.json', 'w+') as file:
+            file.write(dict_json)
+        """
         plt.title('speed curve', fontsize=15)  # 标题，并设定字号大小
         plt.xlabel(u'time(s)', fontsize=10)  # 设置x轴，并设定字号大小
         plt.ylabel(u'speed(m/s)', fontsize=10)  # 设置y轴，并设定字号大小
@@ -129,11 +191,19 @@ def run(thre):
         # plt.plot(time, np.array(target_v)[:,1], color='#708090', linewidth=1.0, linestyle=':', marker='s', label='target steer')
         plt.legend(loc='best')  # 图例展示位置，数字代表第几象限3
         plt.show()
+        """
+
 
 
 if __name__ == '__main__':
-    path = './data'  # 输入文件夹地址
-    files = os.listdir(path)  # 读入文件夹
-    num = len(files)  # 统计文件夹中的文件个数
-    while num < 1000:
-        run(150)
+    path = './data/num.json'  # 输入文件夹地址
+    with open(path, 'r+') as file:
+        content = file.read()
+    content = json.loads(content)  # 将json格式文件转化为python的字典文件
+    num = content['num'] # 统计文件夹中的文件个数
+    while num < 6000:
+        run(150,num)
+        with open(path, 'r+') as file:
+            content = file.read()
+        content = json.loads(content)  # 将json格式文件转化为python的字典文件
+        num = content['num']  # 统计文件夹中的文件个数

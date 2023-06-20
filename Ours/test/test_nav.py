@@ -97,9 +97,9 @@ while True:
 
     left_right = abs(np.cross(car_dir, s_dir)) / np.cross(car_dir, s_dir)
     angle = np.arccos(cos_theta) * left_right
-    t = (0.5 - 10 * abs(angle)) + 0.1
+    t = (0.4 - 10 * abs(angle)) + 0
     vehicle.apply_control(
-        carla.VehicleControl(throttle=t, steer=angle * 1.5, brake=0.0, hand_brake=False, reverse=False))
+        carla.VehicleControl(throttle=t, steer=angle * 1, brake=0.0, hand_brake=False, reverse=False))
     # time.sleep(0.2)
     v = vehicle.get_velocity()
     kmh = int(3.6 * np.sqrt(v.x ** 2 + v.y ** 2 + v.z ** 2))

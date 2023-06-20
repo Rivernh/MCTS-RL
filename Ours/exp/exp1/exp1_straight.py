@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 MCTS for autonomous driving
+chapter 2：one ego car go straight/one turn/navigation/dynamics
 
 @author: Liuhan Yin
 """
@@ -40,8 +41,8 @@ def Env_init():
         'desired_speed': 10,  # desired speed (m/s)
         'max_ego_spawn_times': 200,  # maximum times to spawn ego vehicle
         'display_route': False,  # whether to render the desired route
-                'ego_transform': [(165.5, -5.3, 180.2), (149, -28.2, 90),],
-        'target_transform': (96.3, -6.9, 180.2),
+        'ego_transform': [(36.8, -4.1, -179.0),(22.7, 3.8, -90.1),],
+        'target_transform': (-10,37.6,85),
         'noise': False,
     }
     env = carla_env.CarlaEnv(params)
@@ -70,10 +71,10 @@ def run():
             next_obs, _, done, _ = car_env.step(move)
             wpt.clear()
             wpt_temp = car_env.waypoints_all
-            if len(wpt_temp[0]) < 8 or len(wpt_temp[1]) < 8:
+            if len(wpt_temp[0]) < 4 or len(wpt_temp[1]) < 4:
                 return True
             for i in range(len(wpt_temp)):
-                wpt.append(wpt_temp[i][2:8])
+                wpt.append(wpt_temp[i][2:7])
             if car_env.time_step % 2 == 0:
                 state = Env_model(vehicle, wpt, ap_vehicle, dt=0.1)  # 动力学仿真环境
 
@@ -112,7 +113,7 @@ def run():
 
 if __name__ == '__main__':
     count = 0
-    num = 2
+    num = 1
     for i in range(num):
        if run():
            count += 1

@@ -10,8 +10,18 @@ import numpy as np
 import copy
 import itertools
 def int2action(int):
-    availables = list(itertools.product(np.array([0, 2.5, 5, 7.5, 10]), np.array([0, -0.1, -0.3, 0.1, 0.3])))
+    availables = list(itertools.product(np.array([2.5, 5, 7.5, 10]), np.array([-0.4,-0.2, 0, 0.2, 0.4])))
+    availables.insert(0,(0, 0))
     return availables[int]
+
+def action2int(action):
+    if action[0]:
+        line = 10 * action[0] / 25
+        row = 100 * action[1] / 20 + 2
+        move = line * 5 + row - 4
+    else:
+        move = 0
+    return int(move)
 
 def softmax(x):
     probs = np.exp(x - np.max(x))
@@ -28,10 +38,18 @@ class TreeNode(object):
         self._u = 0
         self._P = prior_p
 
-    def expand(self, action_priors):
+    def expand(self, action_priors, rank=0):
         for action, prob in action_priors:
-            if action not in self._children:
-                self._children[action] = TreeNode(self, prob)
+          #  print(action,prob)
+            if rank:
+                if action >=21:
+                    action = action % 21
+                    if action not in self._children:
+                        self._children[action] = TreeNode(self, prob)
+            else:
+                if action < 21:
+                    if action not in self._children:
+                        self._children[action] = TreeNode(self, prob)
 
     def select(self, c_puct):
         return max(self._children.items(),
@@ -63,6 +81,14 @@ class TreeNode(object):
         return self._parent is None
 
 
+def limit(x,a=0,b=1):
+    if x > b:
+        return b
+    if x < a:
+        return a
+    return round(x, 3)
+
+
 class MCTS(object):
     def __init__(self, policy_value_fn, c_puct=5, n_playout=10000):
         self._root = TreeNode(None, 1.0)
@@ -80,13 +106,19 @@ class MCTS(object):
             action, node = node.select(self._c_puct)
             action = int2action(action)
             state.do_move(action, rank)
-
-        action_probs, leaf_value = self._policy(state)
+        state_v = np.array([state.UGV_info[0][0], state.UGV_info[0][1], state.UGV_info[0][2], state.speed_temp[0],
+                          state.wpt[0][2][0], state.wpt[0][2][1], 0] + [state.UGV_info[1][0], state.UGV_info[1][1],
+                                                           state.UGV_info[1][2], state.speed_temp[1],
+                                                           state.wpt[1][2][0], state.wpt[1][2][1],1])
+        action_probs, leaf_value = self._policy(state_v)
+        leaf_value = leaf_value[rank]
         # Check for end of game.
-        node.expand(action_probs)
-        leaf_value = state.run_episode(rank)
+        node.expand(action_probs,rank=rank)
+        #leaf_value = state.run_episode(rank)
 
         # Update value and visit count of nodes in this traversal.
+      #  node.update_recursive(leaf_value[rank])
+     #   print(leaf_value)
         node.update_recursive(leaf_value)
 
     def get_move_probs(self, state, rank, temp=1e-3):
@@ -95,12 +127,22 @@ class MCTS(object):
             self._playout(state,rank)
 
         # calc the move probabilities based on visit counts at the root node
-        act_visits = [(act, node._n_visits, node._Q)
+        act_visits = [(act, node._n_visits)
                       for act, node in self._root._children.items()]
-        acts, visits, value = zip(*act_visits)
+        acts, visits = zip(*act_visits)
         act_probs = softmax(1.0/temp * np.log(np.array(visits) + 1e-10))
+        #act_probs = softmax(100 * np.array(visits) / np.sum(np.array(visits)))
+        #print(act_probs)
+        #print(visits)
 
-        return acts, act_probs, value
+        p = [limit(c) for c in act_probs]
+        s = 1 - sum(p)
+        for i in range(len(p)):
+            if (p[i] + s) > 0:
+                p[i] += s
+                break
+
+        return acts, p
 
     def update_with_move(self, last_move):
         if last_move in self._root._children:
@@ -112,16 +154,9 @@ class MCTS(object):
     def __str__(self):
         return "MCTS"
 
-def policy_value_fn(TreeEnv):
-    """a function that takes in a obs and outputs a list of (action, probability)
-    tuples and a score for the obs"""
-    # return uniform probabilities and 0 score for pure MCTS
-    action_probs = np.ones(len(TreeEnv.availables))/len(TreeEnv.availables)
-    return zip(TreeEnv.availables, action_probs), 0
-
 class MCTSPlayer(object):
-    def __init__(self,
-                 c_puct=5, n_playout=200, is_selfplay=0):
+    def __init__(self,policy_value_fn,
+                 c_puct=2, n_playout=200, is_selfplay=0):
         self.mcts = MCTS(policy_value_fn, c_puct, n_playout)
         self._is_selfplay = is_selfplay
 
@@ -134,25 +169,25 @@ class MCTSPlayer(object):
     def get_action(self, state, rank, temp=1e-3, return_prob=1):
         # the pi vector returned by MCTS as in the alphaGo Zero paper
         move_probs = np.zeros(state.availables_len)
-        acts, probs, value = self.mcts.get_move_probs(state,rank, temp)
+        acts, probs = self.mcts.get_move_probs(state,rank, temp)
         move_probs[list(acts)] = probs
         if self._is_selfplay:
 
             move = np.random.choice(
                 acts,
-                p=0.75*probs + 0.25*np.random.dirichlet(0.3*np.ones(len(probs)))
+                p=0.75*np.array(probs) + 0.25*np.random.dirichlet(0.03*np.ones(len(probs)))
             )
             # update the root node and reuse the search tree
-            self.mcts.update_with_move(move)
+            self.mcts.update_with_move(-1)
         else:
 
             move = np.random.choice(acts, p=probs)
             # reset the root node
             self.mcts.update_with_move(-1)
         move = int2action(move)
-        state.change_init(move,rank)
+        #state.change_init(move,rank)
         if return_prob:
-            return move, move_probs, value
+            return move, move_probs
         else:
             return move
 

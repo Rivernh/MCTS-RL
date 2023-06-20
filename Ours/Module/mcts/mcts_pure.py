@@ -13,8 +13,19 @@ import carla
 import time as t
 import itertools
 def int2action(int):
-    availables = list(itertools.product(np.array([0, 2.5, 5, 7.5, 10]), np.array([0, -0.1, -0.3, 0.1, 0.3])))
+    availables = list(itertools.product(np.array([2.5, 5, 7.5, 10]), np.array([-0.4,-0.2, 0, 0.2, 0.4])))
+    availables.insert(0,(0, 0))
     return availables[int]
+
+def action2int(action):
+    if action[0]:
+        line = 10 * action[0] / 25
+        row = 100 * action[1] / 20 + 2
+        move = line * 5 + row - 4
+    else:
+        move = 0
+    return int(move)
+
 
 def rollout_policy_fn(TreeEnv):
     """a coarse, fast version of policy_fn used in the rollout phase."""
@@ -36,7 +47,7 @@ class TreeNode(object):
     def __init__(self, parent, prior_p):
         self._parent = parent
         self._children = {}  # a map from action to TreeNode
-        self._n_visits = np.finfo(float).eps #avoid 0 to in the denominator
+        self._n_visits = 0.0000001 #avoid 0 to in the denominator
         self._Q = np.finfo(float).eps
         self._u = 0
         self._P = prior_p
@@ -72,8 +83,20 @@ class TreeNode(object):
     def is_leaf(self):
         return self._children == {}
 
+    def leaf(self):
+        return self._n_visits < 2
+
     def is_root(self):
         return self._parent is None
+
+    def print(self,cnt):
+        cnt += 1
+        for action,node in self._children.items():
+            print(f"action:{action}   time:{node._n_visits}   value:{node._Q / node._n_visits}    current layer:{cnt}")
+            #print(node.leaf())
+            if node.leaf():
+                continue
+            node.print(cnt)
 
 
 class MCTS(object):
@@ -114,6 +137,10 @@ class MCTS(object):
             #print(f"play out:{n}")
         #for action,node in self._root._children.items():
         #    print(f"action:{action}   time:{node._n_visits}   value:{node._Q / node._n_visits}")
+        #if rank == 0:
+        #    self._root.print(0)
+
+
         return max(self._root._children.items(),
                    key=lambda act_node: act_node[1]._n_visits)[0]
 
@@ -139,14 +166,37 @@ class MCTSPlayer(object):
         self.mcts.update_with_move(-1)
 
     def get_action(self, state, rank):
-        s = t.clock()
+        #s = t.clock()
         move = self.mcts.get_move(state, rank)
         move = int2action(move)
-        state.change_init(move,rank)
-        e = t.clock()
-        print(f"time:{e - s}")
+        #state.change_init(move,rank)
+        #e = t.clock()#
+        #print(f"time:{e - s}")
         self.mcts.update_with_move(-1)
         return move
+
+    def game_move(self, state):
+        move_rew = []
+        move_fowllower = []
+        move_leader = []
+        for i in range(state.availables_len):
+            state.reset()
+            action = int2action(i)
+            state.do_move(action, 0)
+            action_fol = self.get_action(state,1)
+            move_fowllower.append(action_fol)
+            state.reset()
+            state.do_move(action_fol, 1)
+            action_lea = self.get_action(state,0)
+            move_leader.append(action_lea)
+            move_rew.append(state.run_episode(0))
+
+        index = np.argmax(np.array(move_rew))
+        index_f = action2int(move_leader[index])
+        move = [move_leader[index], move_fowllower[index_f]]
+
+        return move
+
 
     def __str__(self):
         return "MCTS {}".format(self.player)

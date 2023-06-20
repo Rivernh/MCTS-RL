@@ -26,12 +26,12 @@ class TransformerPolicy:
             self.device = torch.device("cuda")
         else:
             self.device = torch.device("cpu")
-        self.l2_const = 1e-4
+        self.l2_const = 1e-2
         self.action_type = 'Discrete'
 
-        self.obs_dim = 16
+        self.obs_dim = 7
         if self.action_type == 'Discrete':
-            self.act_dim = 25
+            self.act_dim = 21
 
         print("obs_dim: ", self.obs_dim)
         print("act_dim: ", self.act_dim)
@@ -62,7 +62,6 @@ class TransformerPolicy:
         :return values: (torch.Tensor) value function predictions.
         :return actions: (torch.Tensor) actions to take.
         """
-
         obs = obs.reshape(-1, self.num_agents, self.obs_dim)
         if available_actions is not None:
             available_actions = available_actions.reshape(-1, self.num_agents, self.act_dim)
@@ -70,8 +69,53 @@ class TransformerPolicy:
         actions, values = self.transformer.get_actions(obs,available_actions,deterministic)
 
         actions = actions.view(-1, self.act_dim)
+        act_probs = np.exp(actions.data.numpy())
         values = values.view(-1)
-        return actions, values
+        return act_probs, values.data.numpy()
+
+    def policy_value(self, state_batch, prob_batch):
+        """
+        input: a batch of states
+        output: a batch of action probabilities and state values
+        """
+        if self.use_gpu:
+            state_batch = Variable(torch.FloatTensor(np.array(state_batch)).cuda())
+            prob_batch = Variable(torch.FloatTensor(np.array(prob_batch)).cuda())
+            log_act_probs, value = self.transformer(state_batch,prob_batch)
+            act_probs = np.exp(log_act_probs.data.cpu().numpy())
+            return act_probs, value.data.cpu().numpy()
+        else:
+            state_batch = Variable(torch.FloatTensor(np.array(state_batch)))
+            prob_batch = Variable(torch.FloatTensor(np.array(prob_batch)))
+            log_act_probs, value = self.transformer(state_batch,prob_batch)
+            act_probs = np.exp(log_act_probs.data.numpy())
+
+            return act_probs, value.data.numpy()
+
+    def policy_value_fn(self, obs):
+        """
+        input: board
+        output: a list of (action, probability) tuples for each available
+        action and the score of the board state
+        """
+        legal_positions = np.arange(42)
+        if self.use_gpu:
+            log_act_probs, value = self.transformer.get_actions(
+                    torch.tensor(torch.from_numpy(obs)).cuda().float())
+            act_probs = log_act_probs.data.cpu().numpy().flatten()
+            #act_probs = np.exp1(log_act_probs.data.cpu().numpy().flatten())
+            #value = value.data.cpu().numpy()
+        else:
+            log_act_probs, value = self.transformer.get_actions(
+                    torch.tensor(torch.from_numpy(obs)).float())
+            #act_probs = np.exp1(log_act_probs.data.numpy().flatten())
+            act_probs = log_act_probs.data.numpy().flatten()
+       # print(sum(act_probs))
+        act_probs = zip(legal_positions, act_probs[legal_positions])
+        #print(value)
+        value = value.data.cpu().numpy()
+       # print(value[0])
+        return act_probs, list(value[0])
 
     def get_values(self, obs, available_actions=None):
         """
@@ -87,33 +131,8 @@ class TransformerPolicy:
 
         values = values.view(-1, 1)
 
-        return values
+        return values.data.numpy()
 
-    def evaluate_actions(self, obs, actions, available_actions=None):
-        """
-        Get action logprobs / entropy and value function predictions for actor update.
-        :param obs (np.ndarray): local agent inputs to the actor.
-        :param actions: (np.ndarray) actions whose log probabilites and entropy to compute.
-        :param available_actions: (np.ndarray) denotes which actions are available to agent
-                                  (if None, all actions available)
-
-        :return values: (torch.Tensor) value function predictions.
-        :return action_log_probs: (torch.Tensor) log probabilities of the input actions.
-        :return dist_entropy: (torch.Tensor) action distribution entropy for the given inputs.
-        """
-        obs = obs.reshape(-1, self.num_agents, self.obs_dim)
-        actions = actions.reshape(-1, self.num_agents, self.act_dim)
-        if available_actions is not None:
-            available_actions = available_actions.reshape(-1, self.num_agents, self.act_dim)
-
-        action_log_probs, values, entropy = self.transformer(obs, actions, available_actions)
-
-        action_log_probs = action_log_probs.view(-1, self.act_dim)
-        values = values.view(-1)
-        entropy = entropy.view(-1, self.act_dim)
-        entropy = entropy.mean()
-
-        return values, action_log_probs, entropy
 
     def save(self, save_dir, episode):
         torch.save(self.transformer.state_dict(), str(save_dir) + "/transformer_" + str(episode) + ".pt")
@@ -142,17 +161,22 @@ class TransformerPolicy:
         # set learning rate
         set_learning_rate(self.optimizer, lr)
 
+        #print(obs_batch.shape)
+        #print(mcts_probs.shape)
         # forward
-        log_act_probs, value, _ = self.transformer(obs_batch, mcts_probs)
+        act_probs, value = self.transformer(obs_batch, mcts_probs)
         # log_act_probs:# (batch, n_agent, action_dim)
         # value:# (batch, n_agent, 1)
         value = value.reshape(-1) # value:# (batch)
-        log_act_probs = log_act_probs.reshape(-1,self.act_dim)# log_act_probs:(batch, action_dim)
+        act_probs = act_probs.reshape(-1,self.act_dim)# log_act_probs:(batch, action_dim)
+        log_act_probs = torch.log(act_probs)
         value_batch = value_batch.reshape(-1) # value_batch:# (batch)
         mcts_probs = mcts_probs.reshape(-1,self.act_dim)# log_act_probs:(batch, action_dim)
         # define the loss = (z - v)^2 - pi^T * log(p) + c||theta||^2
         # Note: the L2 penalty is incorporated in optimizer
         value_loss = F.mse_loss(value, value_batch)
+        #print(mcts_probs.shape)
+        #print(log_act_probs.shape)
         policy_loss = -torch.mean(torch.sum(mcts_probs*log_act_probs, 1))
         loss = value_loss + policy_loss
         # backward and optimize
@@ -162,4 +186,46 @@ class TransformerPolicy:
         entropy = -torch.mean(
                 torch.sum(torch.exp(log_act_probs) * log_act_probs, 1)
                 )
-        return loss.item(), entropy.item()
+        return value_loss.item(), policy_loss.item(), entropy.item()
+
+    def get_loss(self, obs_batch, mcts_probs, value_batch):
+        # obs_batch:# (batch, n_agent, obs_dim)
+        # mcts_probs:# (batch, n_agent, action_dim)
+        # value_batch:# (batch, n_agent, 1)
+        """perform a training step"""
+        # wrap in Variable
+        if self.use_gpu:
+            obs_batch = Variable(torch.FloatTensor(np.array(obs_batch)).cuda())
+            mcts_probs = Variable(torch.FloatTensor(np.array(mcts_probs)).cuda())
+            value_batch = Variable(torch.FloatTensor(np.array(value_batch)).cuda())
+        else:
+            obs_batch = Variable(torch.FloatTensor(np.array(obs_batch)))
+            mcts_probs = Variable(torch.FloatTensor(np.array(mcts_probs)))
+            value_batch = Variable(torch.FloatTensor(np.array(value_batch)))
+
+
+        #print(obs_batch.shape)
+        #print(mcts_probs.shape)
+        # forward
+        act_probs, value = self.transformer(obs_batch, mcts_probs)
+        # log_act_probs:# (batch, n_agent, action_dim)
+        # value:# (batch, n_agent, 1)
+        value = value.reshape(-1) # value:# (batch)
+        act_probs = act_probs.reshape(-1,self.act_dim)# log_act_probs:(batch, action_dim)
+        log_act_probs = torch.log(act_probs)
+        value_batch = value_batch.reshape(-1) # value_batch:# (batch)
+        mcts_probs = mcts_probs.reshape(-1,self.act_dim)# log_act_probs:(batch, action_dim)
+        # define the loss = (z - v)^2 - pi^T * log(p) + c||theta||^2
+        # Note: the L2 penalty is incorporated in optimizer
+        value_loss = F.mse_loss(value, value_batch)
+        #print(mcts_probs.shape)
+        #print(log_act_probs.shape)
+        policy_loss = -torch.mean(torch.sum(mcts_probs*log_act_probs, 1))
+        # calc policy entropy, for monitoring only
+        entropy = -torch.mean(
+                torch.sum(torch.exp(log_act_probs) * log_act_probs, 1)
+                )
+        return value_loss.item(), policy_loss.item(), entropy.item()
+
+
+

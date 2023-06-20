@@ -55,3 +55,13 @@ value dim 1
 在线学习
 
 init policy--------->data-------->policy
+
+
+
+数据收集过程：
+
+1、一个mcts搜索循环得到对应的其初始状态，状态对应转移动作概率，状态的价值评价可以通过model运行一次再得到，同时通过carla检测碰撞，碰撞则返回较大的修正损失，反馈到所有该episode的data。
+
+2、在线学习：通过学习到的网络进行仿真，carla反馈的价值作为修正来继续在线学习。
+
+![img](https://pic2.zhimg.com/80/v2-5f1ecc9bf7b8fad1a592e7dbf094a40d_720w.webp)

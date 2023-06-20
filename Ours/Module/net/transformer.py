@@ -27,13 +27,16 @@ def init_(m, gain=0.01, activate=False):
 def discrete_autoregreesive_act(decoder, obs_rep, batch_size, n_agent, action_dim, tpdv,
                                 available_actions=None, deterministic=False):
     shifted_action = torch.zeros((batch_size, n_agent, action_dim)).to(**tpdv) # (batch, n_agent, action_dim)
-    output_action = torch.zeros((batch_size, n_agent, action_dim), dtype=torch.long) # (batch, n_agent, action_dim)
+    output_action = torch.zeros((batch_size, n_agent, action_dim)) # (batch, n_agent, action_dim)
 
     for i in range(n_agent):
-        logit, log_prob = decoder(shifted_action, obs_rep)[:, i, :]
-        output_action[:, i, :] = log_prob
+        #print(decoder(shifted_action, obs_rep).shape)
+        prob = decoder(shifted_action, obs_rep)[:, i, :]
+       # print(prob)
+        output_action[:, i, :] = prob
         if i + 1 < n_agent:
-            shifted_action[:, i + 1, :] = log_prob
+            shifted_action[:, i + 1, :] = prob
+       # print(shifted_action)
     return output_action
     # output_action：(batch, n_agent, action_dim)
 
@@ -44,11 +47,10 @@ def discrete_parallel_act(decoder, obs_rep, prob, batch_size, n_agent, action_di
     # prob：(batch, n_agent, action_dim)
     shifted_action = torch.zeros((batch_size, n_agent, action_dim)).to(**tpdv) # (batch, n_agent, action_dim)
     shifted_action[:, 1:, :] = prob[:, :-1, :]
-    logit, log_prob = decoder(shifted_action, obs_rep)
+    #logit, log_prob = decoder(shifted_action, obs_rep)
+    prob = decoder(shifted_action, obs_rep)
 
-    distri = Categorical(logits=logit)
-    entropy = distri.entropy().unsqueeze(-1)
-    return log_prob, entropy
+    return prob
     # log_prob：(batch, n_agent, action_dim)
 
 class SelfAttention(nn.Module):
@@ -89,7 +91,7 @@ class SelfAttention(nn.Module):
 
         if self.masked:
             att = att.masked_fill(self.mask[:, :, :L, :L] == 0, float('-inf'))
-        att = F.softmax(att, dim=-1)
+        att = F.softmax(att, dim=2)
 
         y = att @ v  # (B, nh, L, L) x (B, nh, L, hs) -> (B, nh, L, hs)
         y = y.transpose(1, 2).contiguous().view(B, L, D)  # re-assemble all head outputs side by side 并排重新组装所有头部输出
@@ -199,10 +201,11 @@ class Decoder(nn.Module):
         x = self.ln(action_embeddings)
         for block in self.blocks:
             x = block(x, obs_rep)
-        logit = self.head(x) # (batch, n_agent, action_dim)
-        log_prob = F.log_softmax(logit)
-
-        return logit, log_prob
+        # (batch, n_agent, action_dim)
+        prob = F.softmax(self.head(x),dim=2)
+      #  print(prob)
+        return prob
+        #return logit, log_prob
 
 
 class MultiAgentTransformer(nn.Module):
@@ -227,28 +230,26 @@ class MultiAgentTransformer(nn.Module):
 
         obs = check(obs).to(**self.tpdv)
         prob = check(prob).to(**self.tpdv)
-
         if available_actions is not None:
             available_actions = check(available_actions).to(**self.tpdv)
 
         batch_size = np.shape(obs)[0]
         v_loc, obs_rep = self.encoder(obs)
         prob = prob.long()
-        prob_log, entropy = discrete_parallel_act(self.decoder, obs_rep, prob, batch_size,
+        #print(obs_rep.shape)
+        prob = discrete_parallel_act(self.decoder, obs_rep, prob, batch_size,
                                                   self.n_agent, self.action_dim, self.tpdv)
-
-        return prob_log, v_loc, entropy
+        #print(prob_log.shape)
+        return prob, v_loc
         # prob_log:(batch, n_agent, action_dim)
         # v_loc:(batch, n_agent, 1)
 
     def get_actions(self, obs, available_actions=None, deterministic=False):
+        obs = obs.reshape((1,-1,7))
         obs = check(obs).to(**self.tpdv)
-        if available_actions is not None:
-            available_actions = check(available_actions).to(**self.tpdv)
 
-        batch_size = np.shape(obs)[0]
         v_loc, obs_rep = self.encoder(obs)
-        output_action = discrete_autoregreesive_act(self.decoder, obs_rep, batch_size,
+        output_action = discrete_autoregreesive_act(self.decoder, obs_rep, 1,
                                                     self.n_agent, self.action_dim, self.tpdv,
                                                     deterministic)
 

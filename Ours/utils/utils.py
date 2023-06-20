@@ -25,7 +25,7 @@ class AgentState:
         self.acc = carla.Vector3D()
         self.pos = carla.Transform()
 
-#some para of the exp
+#some para of the exp1
 class Mypara:
     """
     some paras used in the paper

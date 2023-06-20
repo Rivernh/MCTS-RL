@@ -26,6 +26,7 @@ from gym_carla.envs.misc import *
 from utils.PID import IncreasPID as PID
 import matplotlib.pyplot as plt
 import cv2
+import random
 
 
 class CarlaEnv(gym.Env):
@@ -49,6 +50,19 @@ class CarlaEnv(gym.Env):
         self.speed_last = None
         self.actorlist = []
         self.ego_state = AgentState()
+        self.ap_vehicles = []
+        self.long = params['long']
+        self.destroy = params['temp_destroy']
+        trans = params['temp_transform']
+        self.temp_transform = []
+        for i in range(len(trans)):
+            temp_transform = carla.Transform(
+                carla.Location(x=trans[i][0], y=trans[i][1], z=0.2),
+                carla.Rotation(yaw=trans[i][2]))
+            temp_transform.location.z = 10.2
+            self.temp_transform.append(temp_transform)
+
+        self.cnt = 0
 
         # Connect to carla server and get world object
         print('connecting to Carla server...')
@@ -92,20 +106,46 @@ class CarlaEnv(gym.Env):
         self.reset_step = 0
         self.total_step = 0
 
+        self.noise = params['noise']
         trans = params['ego_transform']
         self.ego_transform = []
+        if self.noise:
+            for i in range(len(trans)):
+                ego_transform = carla.Transform(
+                    carla.Location(x=trans[i][0], y=trans[i][1], z=0.2),
+                    carla.Rotation(yaw=trans[i][2]))
+                ego_transform = self.map.get_waypoint(ego_transform.location).transform
+                noise = random.randrange(-5,5) * 1
+                yaw = ego_transform.rotation.yaw / 180 * math.pi
+                ego_transform.location.x += noise * math.cos(yaw)
+                ego_transform.location.y += noise * math.sin(yaw)
+                ego_transform.location.z = 4.2
+                self.ego_transform.append(ego_transform)
+        else:
+            for i in range(len(trans)):
+                ego_transform = carla.Transform(
+                    carla.Location(x=trans[i][0], y=trans[i][1], z=0.2),
+                    carla.Rotation(yaw=trans[i][2]))
+                ego_transform = self.map.get_waypoint(ego_transform.location).transform
+                ego_transform.location.z = 4.2
+                self.ego_transform.append(ego_transform)
+
+        trans = params['target_transform']
+        self.target_transform = []
         for i in range(len(trans)):
-            ego_transform = carla.Transform(
+            target_transform = carla.Transform(
                 carla.Location(x=trans[i][0], y=trans[i][1], z=0.2),
                 carla.Rotation(yaw=trans[i][2]))
-            ego_transform = self.map.get_waypoint(ego_transform.location).transform
-            ego_transform.location.z = 4.2
-            self.ego_transform.append(ego_transform)
+            self.target_transform.append(target_transform)
 
-        self.target_transform = carla.Transform(
-            carla.Location(x=params['target_transform'][0], y=params['target_transform'][1], z=0.2),
-            carla.Rotation(yaw=params['target_transform'][2]))
-
+        trans = params['temp_target']
+        self.temp_target = []
+        for i in range(len(trans)):
+            target_transform = carla.Transform(
+                carla.Location(x=trans[i][0], y=trans[i][1], z=0.2),
+                carla.Rotation(yaw=trans[i][2]))
+            self.temp_target.append(target_transform)
+        self.temp_target.append(self.target_transform[1])
         # Initialize the renderer
         self._init_renderer()
 
@@ -156,7 +196,7 @@ class CarlaEnv(gym.Env):
                     else:
                         ego_spawn_times += 1
                         time.sleep(0.1)
-
+        #self.egos.append(self.ego)
         # Add collision sensor
         self.collision_sensor = self.world.spawn_actor(self.collision_bp, carla.Transform(), attach_to=self.ego)
         self.collision_sensor.listen(lambda event: get_collision_hist(event))
@@ -197,8 +237,9 @@ class CarlaEnv(gym.Env):
         self.waypoints_all = []
         for i in range(len(self.egos)):
             self.waypoints = []
-            self.routeplanner = GlobalRoutePlanner(self.map, 5)
-            self.temp = self.routeplanner.trace_route(self.egos[i].get_transform().location, self.target_transform.location)
+            self.routeplanner = GlobalRoutePlanner(self.map, 2)
+            self.temp = self.routeplanner.trace_route(self.egos[i].get_transform().location,
+                                                          self.target_transform[i].location)
             for _, (waypoint, _) in enumerate(self.temp):
                 self.waypoints.append(
                     [waypoint.transform.location.x, waypoint.transform.location.y, waypoint.transform.rotation.yaw])
@@ -249,19 +290,29 @@ class CarlaEnv(gym.Env):
             self.egos[i].apply_control(acts[i])
         #self.ego.apply_control(acts[0])
         self.world.tick()
+        self.check_spaw()
         vehicle_poly_dict = self._get_actor_polygons('vehicle.*')
         self.vehicle_polygons.append(vehicle_poly_dict)
         while len(self.vehicle_polygons) > self.max_past_step:
            self.vehicle_polygons.pop(0)
         self.waypoints_all = []
+
         for i in range(len(self.egos)):
             self.waypoints = []
-            self.routeplanner = GlobalRoutePlanner(self.map, 5)
-            self.temp = self.routeplanner.trace_route(self.egos[i].get_transform().location, self.target_transform.location)
+            #self.routeplanner = GlobalRoutePlanner(self.map, 2)
+            self.temp = self.routeplanner.trace_route(self.egos[i].get_transform().location, self.target_transform[i].location)
             for _, (waypoint, _) in enumerate(self.temp):
                 self.waypoints.append(
                     [waypoint.transform.location.x, waypoint.transform.location.y, waypoint.transform.rotation.yaw])
             self.waypoints_all.append(self.waypoints)
+            """
+            x = self.waypoints_all[i][0][0]
+            y = self.waypoints_all[i][0][1]
+            if math.sqrt(x**2+y**2) < 0.25:
+                self.waypoints_all[i].pop(0)
+            self.waypoints = self.waypoints_all[0]
+            """
+
 
         # obs information
         info = {
@@ -274,12 +325,15 @@ class CarlaEnv(gym.Env):
 
         spectator = self.world.get_spectator()
         transform = self.ego.get_transform()
-        spectator.set_transform(carla.Transform(transform.location + carla.Location(z=100),
+        spectator.set_transform(carla.Transform(transform.location + carla.Location(z=50),
                                                 carla.Rotation(pitch=-90)))
         #for i in range(len(self.egos)):
         #    self.draw_waypoints(self.waypoints_all[i])
 
-        return (self._get_obs(), _, self._terminal(), _)
+        #for i in range(len(self.egos)):
+       #     self.draw_arrow(self.egos[i].get_transform().location,self.waypoints_all[i][4])
+
+        return (self._get_obs(), 0, self._terminal(), 0)
 
     def seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
@@ -342,8 +396,9 @@ class CarlaEnv(gym.Env):
         vehicle = self.world.try_spawn_actor(blueprint, transform)
         self.barrier = vehicle
         if vehicle is not None:
-            #vehicle.set_autopilot()
+            vehicle.set_autopilot()
             return True
+        self.ap_vehicles.append(vehicle)
         return False
 
     def _try_spawn_other_vehicle_at(self, transform):
@@ -525,6 +580,7 @@ class CarlaEnv(gym.Env):
 
         # If collides
         if len(self.collision_hist) > 0:
+            print("crash happened!")
             return True
 
         # If out of lane
@@ -553,5 +609,42 @@ class CarlaEnv(gym.Env):
     def draw_waypoints(self, waypoints):
         for waypoint in waypoints:
             self.world.debug.draw_point(carla.Location(x=waypoint[0],y=waypoint[1],z=1),
-                                    color=carla.Color(r=0, g=255, b=0),
+                                    color=carla.Color(r=255, g=0, b=0),
                                     life_time=0.1)
+
+    def draw_arrow(self,s,e):
+       # print(s,e)
+        start = s
+        end = carla.Location(x=e[0],y=e[1],z=1)
+        self.world.debug.draw_arrow(start, end, life_time=0.1)
+
+    def check_spaw(self):
+        if self.long:
+
+            trans = self.ego.get_transform()
+            x = trans.location.x
+            y = trans.location.y
+
+            if self.cnt < 3:
+                print(x, self.destroy[self.cnt])
+                if x > self.destroy[self.cnt]:
+                    self.egos[0].destroy()
+                    self.egos = []
+                    self._try_spawn_other_vehicle_at(self.temp_transform[self.cnt])
+                    self.target_transform[0] = self.temp_target[self.cnt]
+                    self.cnt += 1
+                    self.egos.append(self.ego)
+                    print("change!")
+            else:
+                print(y, self.destroy[self.cnt])
+                if y > self.destroy[self.cnt]:
+                    self.egos[0].destroy()
+                    self.egos = []
+                    self._try_spawn_other_vehicle_at(self.temp_transform[self.cnt])
+                    self.target_transform[0] = self.temp_target[self.cnt]
+                    self.cnt += 1
+                    self.egos.append(self.ego)
+                    print(" final change!")
+
+            pass
+
